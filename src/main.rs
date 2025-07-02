@@ -67,11 +67,11 @@ async fn ping_ssh_server(cli: Cli) -> anyhow::Result<()> {
 }
 
 async fn socks5_server(cli: Cli) -> anyhow::Result<()> {
-    let session = Arc::new(
+    let mut session = Arc::new(
         Session::connect(
-            cli.private_key,
-            cli.ssh_username,
-            (cli.ssh_host, cli.ssh_port),
+            &cli.private_key,
+            &cli.ssh_username,
+            (cli.ssh_host.clone(), cli.ssh_port),
         )
         .await?,
     );
@@ -85,6 +85,15 @@ async fn socks5_server(cli: Cli) -> anyhow::Result<()> {
                 tracing::debug!("accepted connection from {client_addr}");
                 if let Err(e) = serve_socks5(session.clone(), socket).await {
                     tracing::error!("{:#}", &e);
+                    session = Arc::new(
+                        Session::connect(
+                            &cli.private_key,
+                            &cli.ssh_username,
+                            (cli.ssh_host.clone(), cli.ssh_port),
+                        )
+                        .await?,
+                    );
+                    tracing::info!("SSH session reconnected");
                 }
             }
             Err(err) => {
