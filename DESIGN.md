@@ -122,15 +122,15 @@ delay = min(initial_delay * backoff^attempt, max_delay)
 ## Implementation Phases
 
 ### Phase 1: Core Infrastructure
-- [ ] CLI argument parsing with clap
-- [ ] SSH connection management (russh)
-- [ ] Retry policy implementation
-- [ ] Health monitoring
+- [x] CLI argument parsing with clap
+- [x] SSH connection management (russh)
+- [x] Retry policy implementation
+- [x] Health monitoring
 
 ### Phase 2: SOCKS5 Proxy
-- [ ] SOCKS5 server implementation
-- [ ] SSH channel forwarding
-- [ ] DNS resolution handling
+- [x] SOCKS5 server implementation
+- [x] SSH channel forwarding
+- [x] DNS resolution handling
 
 ### Phase 3: Polish
 - [ ] Configuration file support
