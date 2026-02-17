@@ -1,13 +1,11 @@
-mod common;
-
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::SshContainer;
-use common::container_echo_addr;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use x2ssh::transport::Transport;
+use x2ssh_test_utils::SshContainer;
+use x2ssh_test_utils::container_echo_addr;
 
 #[tokio::test]
 async fn transport_check_alive_succeeds() {

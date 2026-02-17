@@ -12,8 +12,7 @@ use x2ssh::transport::TransportConfig;
 
 pub struct SshContainer {
     pub port: u16,
-    #[allow(dead_code)]
-    container: testcontainers::ContainerAsync<GenericImage>,
+    _container: testcontainers::ContainerAsync<GenericImage>,
 }
 
 impl SshContainer {
@@ -31,7 +30,10 @@ impl SshContainer {
 
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        Self { port, container }
+        Self {
+            port,
+            _container: container,
+        }
     }
 
     pub fn host(&self) -> &str {
@@ -40,7 +42,7 @@ impl SshContainer {
 
     pub fn transport_config(&self) -> TransportConfig {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let key_path = manifest_dir.join("tests/fixtures/keys/id_ed25519");
+        let key_path = manifest_dir.join("../tests/fixtures/keys/id_ed25519");
 
         TransportConfig {
             retry_policy: RetryPolicy {

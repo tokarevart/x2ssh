@@ -167,18 +167,34 @@ delay = min(initial_delay * backoff^attempt, max_delay)
 ```
 tests/
 ├── fixtures/
-│   ├── Dockerfile           # SSH server image
+│   ├── Dockerfile           # SSH server image with echo server
 │   └── keys/                # Pre-generated test keys
-├── common/
-│   └── mod.rs               # Container fixture, SSH client helpers
 ├── e2e_socks5.rs            # SOCKS5 connect/transfer tests
 ├── e2e_reconnect.rs         # Connection drop/reconnect tests
 └── e2e_retry.rs             # Retry policy behavior tests
+
+x2ssh-test-utils/
+└── src/lib.rs               # Shared test utilities (SshContainer, Socks5Client)
+
+scripts/
+└── setup-tests.sh           # Build Docker test image
 
 src/
 ├── retry.rs                 # Unit testable retry logic
 └── cli.rs                   # Unit testable CLI parsing
 ```
+
+### Running Tests
+
+1. Build the Docker test image:
+   ```bash
+   ./scripts/setup-tests.sh
+   ```
+
+2. Run tests:
+   ```bash
+   cargo test
+   ```
 
 ### Docker Fixture
 
@@ -186,18 +202,3 @@ src/
 - Pre-baked SSH keys for deterministic auth
 - Random host port mapping to avoid conflicts
 - Auto-cleanup on test completion
-
-### Test Cases
-
-**Unit Tests:**
-- `retry::test_backoff_calculation`
-- `retry::test_max_delay_cap`
-- `retry::test_max_attempts`
-- `cli::test_argument_parsing`
-
-**E2E Tests:**
-- `socks5_handshake_success`
-- `socks5_connect_tcp_forward`
-- `socks5_multiple_concurrent_connections`
-- `reconnect_on_ssh_drop`
-- `retry_exponential_backoff`

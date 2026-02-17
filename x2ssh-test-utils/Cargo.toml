@@ -1,0 +1,9 @@
+[package]
+name = "x2ssh-test-utils"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+testcontainers = "0.24"
+tokio = { version = "1.45.1", features = ["io-util", "net", "time"] }
+x2ssh = { path = ".." }

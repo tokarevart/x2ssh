@@ -1,12 +1,10 @@
-mod common;
-
 use std::path::PathBuf;
 use std::time::Duration;
 
-use common::SshContainer;
 use x2ssh::retry::RetryPolicy;
 use x2ssh::transport::Transport;
 use x2ssh::transport::TransportConfig;
+use x2ssh_test_utils::SshContainer;
 
 #[test]
 fn retry_backoff_calculation() {

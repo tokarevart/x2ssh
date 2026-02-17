@@ -1,15 +1,13 @@
-mod common;
-
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::Socks5Client;
-use common::SshContainer;
-use common::container_echo_addr;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use x2ssh::socks;
 use x2ssh::transport::Transport;
+use x2ssh_test_utils::Socks5Client;
+use x2ssh_test_utils::SshContainer;
+use x2ssh_test_utils::container_echo_addr;
 
 #[tokio::test]
 async fn socks5_handshake_success() {

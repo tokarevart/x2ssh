@@ -3896,10 +3896,19 @@ dependencies = [
  "fast-socks5",
  "russh",
  "shell-escape",
- "testcontainers",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "x2ssh-test-utils",
+]
+
+[[package]]
+name = "x2ssh-test-utils"
+version = "0.1.0"
+dependencies = [
+ "testcontainers",
+ "tokio",
+ "x2ssh",
 ]
 
 [[package]]
