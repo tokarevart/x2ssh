@@ -177,7 +177,8 @@ x2ssh-test-utils/
 └── src/lib.rs               # Shared test utilities (SshContainer, Socks5Client)
 
 scripts/
-└── setup-tests.sh           # Build Docker test image
+├── setup-tests.sh           # Build Docker test image
+└── generate-test-keys.sh    # Generate SSH keys for testing
 
 src/
 ├── retry.rs                 # Unit testable retry logic
@@ -202,3 +203,13 @@ src/
 - Pre-baked SSH keys for deterministic auth
 - Random host port mapping to avoid conflicts
 - Auto-cleanup on test completion
+
+### SSH Keys Generation
+
+To regenerate the test SSH keys in `tests/fixtures/keys/`:
+
+```bash
+./scripts/generate-test-keys.sh
+```
+
+This creates a deterministic ED25519 key pair for automated testing.
