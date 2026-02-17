@@ -2,6 +2,13 @@
 name = "x2ssh-test-utils"
 version = "0.1.0"
 edition = "2024"
+authors = ["Artem Tokarev <tokarev28@gmail.com>"]
+license = "MIT"
+description = "Test utilities for x2ssh"
+repository = "https://github.com/tokarevart/x2ssh"
+keywords = ["test", "ssh", "testing", "utils"]
+categories = ["development-tools::testing"]
+publish = false
 
 [dependencies]
 testcontainers = "0.24"

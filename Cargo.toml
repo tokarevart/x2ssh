@@ -1,10 +1,18 @@
 [workspace]
 members = [".", "x2ssh-test-utils"]
+resolver = "2"
 
 [package]
 name = "x2ssh"
 version = "0.1.0"
 edition = "2024"
+authors = ["Artem Tokarev <tokarev28@gmail.com>"]
+license = "MIT"
+description = "SOCKS5 proxy using SSH as transport"
+readme = "README.md"
+repository = "https://github.com/tokarevart/x2ssh"
+keywords = ["ssh", "socks5", "proxy", "tunnel", "network"]
+categories = ["network-programming", "command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.98"
