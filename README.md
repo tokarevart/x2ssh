@@ -1,6 +1,6 @@
 # x2ssh
 
-A CLI tool that provides SOCKS5 proxy functionality using SSH as the transport protocol.
+A SOCKS5 proxy client that uses SSH as a transport to connect to your existing server.
 
 ## Features
 
