@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,7 +12,6 @@ use tracing::debug;
 use tracing::info;
 use tracing::warn;
 
-use crate::cli::Cli;
 use crate::retry::RetryPolicy;
 
 struct Client;
@@ -36,7 +36,7 @@ pub struct Transport {
 pub struct TransportConfig {
     pub retry_policy: RetryPolicy,
     pub health_interval: Duration,
-    pub key_path: Option<Arc<std::path::PathBuf>>,
+    pub key_path: Option<PathBuf>,
     pub user: String,
     pub host: String,
     pub port: u16,
@@ -59,7 +59,7 @@ impl Transport {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No identity file specified"))?;
 
-        let key_pair = russh::keys::load_secret_key(key_path.as_ref(), None)?;
+        let key_pair = russh::keys::load_secret_key(key_path, None)?;
 
         let ssh_config = Arc::new(russh::client::Config::default());
         let sh = Client;
@@ -184,38 +184,5 @@ impl Transport {
 
         jh.abort();
         Ok(())
-    }
-
-    pub async fn close(&self) -> anyhow::Result<()> {
-        self.session
-            .lock()
-            .await
-            .disconnect(russh::Disconnect::ByApplication, "", "en")
-            .await?;
-        Ok(())
-    }
-}
-
-impl TransportConfig {
-    pub fn from_cli(cli: &Cli) -> Result<Self, String> {
-        let (user, host) = cli.user_host()?;
-
-        let retry_policy = RetryPolicy {
-            max_attempts: cli.retry_max,
-            initial_delay: Duration::from_millis(cli.retry_delay),
-            backoff: cli.retry_backoff,
-            max_delay: Duration::from_millis(cli.retry_max_delay),
-        };
-
-        let key_path = cli.identity.as_ref().map(|p| Arc::new(p.clone()));
-
-        Ok(Self {
-            retry_policy,
-            health_interval: Duration::from_millis(cli.health_interval),
-            key_path,
-            user,
-            host,
-            port: cli.port,
-        })
     }
 }
