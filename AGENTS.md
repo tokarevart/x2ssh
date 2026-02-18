@@ -2,9 +2,11 @@
 
 ## Quick Reference
 
-**Project**: SOCKS5 proxy using SSH transport (Rust + Python E2E tests)
+**Project**: SOCKS5 proxy and VPN tunnel using SSH transport (Rust + Python E2E tests)
 
 **Key Principle**: Split testing - Rust unit tests (fast) + Python E2E tests (Docker-based)
+
+**Current Phase**: Phase 2 complete (SOCKS5), Phase 3 planned (VPN - see VPN.md)
 
 ## Essential Commands
 
@@ -86,4 +88,6 @@ x2ssh/
 ## See Also
 
 - **DESIGN.md** - Architecture, testing strategy, implementation details
+- **VPN.md** - VPN tunnel design and implementation plan
 - **README.md** - User documentation
+- **todo/UDP_ASSOCIATE.md** - UDP Associate design analysis (deferred)

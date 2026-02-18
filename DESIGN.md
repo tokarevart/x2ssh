@@ -7,13 +7,13 @@ x2ssh is a CLI tool that provides SOCKS5 proxy functionality using SSH as the tr
 ### Core Features
 
 - **SOCKS5 Proxy**: Application-level proxy for SOCKS5-compatible applications
+- **VPN Tunnel**: System-level tunnel for all TCP and UDP traffic (see [VPN.md](./VPN.md))
 
 ### Non-Features
 
 - No raw port forwarding (`-L`, `-R`) - use standard SSH for that
 - No shell/terminal access - use standard SSH for that
 - No SSH server functionality - client only
-- No VPN tunnel - see [VPN.md](./VPN.md) for future plans
 
 ## Why
 
@@ -132,7 +132,14 @@ delay = min(initial_delay * backoff^attempt, max_delay)
 - [x] SSH channel forwarding
 - [x] DNS resolution handling
 
-### Phase 3: Polish
+### Phase 3: VPN Tunnel
+- [ ] Server-side UDP agent (see [VPN.md](./VPN.md))
+- [ ] TUN interface setup (Linux + Windows)
+- [ ] Packet parsing and forwarding
+- [ ] Routing configuration
+- [ ] Agent deployment and lifecycle
+
+### Phase 4: Polish
 - [ ] Configuration file support
 - [ ] Logging and diagnostics
 - [ ] Performance optimization
