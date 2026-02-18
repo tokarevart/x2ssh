@@ -33,9 +33,9 @@ x2ssh is a CLI tool that provides SOCKS5 proxy functionality using SSH as the tr
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                         CLIENT                               │
+│                         CLIENT                              │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────────┐  │
-│  │   CLI App   │───▶│  Transport  │───▶│  SSH Connection │──┼──▶ SSH Server
+│  │   CLI App   │───▶│  Transport  │──▶│  SSH Connection │──┼──▶ SSH Server
 │  │  (x2ssh)    │    │   Layer     │    │   (russh)       │  │
 │  └──────┬──────┘    └─────────────┘    └─────────────────┘  │
 │         │                                                   │
@@ -46,7 +46,7 @@ x2ssh is a CLI tool that provides SOCKS5 proxy functionality using SSH as the tr
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
-│                         SERVER                               │
+│                         SERVER                              │
 │  ┌─────────────┐                                            │
 │  │   SSHD      │  (existing SSH server, no setup required)  │
 │  │  (existing) │                                            │
@@ -158,44 +158,81 @@ delay = min(initial_delay * backoff^attempt, max_delay)
 
 ### Approach
 
-- **Unit tests**: Built-in `#[test]` for sync pure logic (retry calculations, CLI parsing)
-- **E2E tests**: `#[tokio::test]` for async network tests with Docker SSH containers
-- **No mocks**: Keep main code simple, test with real components
+Tests are split into two separate projects:
 
-### Test Structure
+- **Rust Unit Tests**: Fast, in-process tests for pure logic (retry calculations, CLI parsing, transport internals)
+- **Python E2E Tests**: Full black-box tests using the compiled binary with Docker SSH containers
+
+This separation:
+- Keeps Rust code clean (no testcontainers dependency)
+- Enables faster Rust builds
+- Tests the actual binary behavior, not library internals
+- Leverages Python's rich testing ecosystem
+
+### Project Structure
 
 ```
-tests/
-├── fixtures/
-│   ├── Dockerfile           # SSH server image with echo server
-│   └── keys/                # Pre-generated test keys
-├── e2e_socks5.rs            # SOCKS5 connect/transfer tests
-├── e2e_reconnect.rs         # Connection drop/reconnect tests
-└── e2e_retry.rs             # Retry policy behavior tests
+# Rust Project (unit tests only)
+src/
+├── retry.rs                 # Unit tests for retry logic
+├── transport.rs             # Unit tests for transport (no Docker needed)
+└── main.rs                  # Unit tests for CLI parsing
 
-x2ssh-test-utils/
-└── src/lib.rs               # Shared test utilities (SshContainer, Socks5Client)
+# Python E2E Project (separate uv-managed project)
+e2e-tests/
+├── pyproject.toml           # uv project configuration
+├── src/x2ssh_e2e/           # Test utilities
+│   ├── ssh_server.py        # Docker container wrapper
+│   └── socks5_client.py     # SOCKS5 test client
+├── tests/
+│   ├── test_socks5.py       # SOCKS5 proxy tests
+│   └── test_transport.py    # Transport/connection tests
+└── conftest.py              # pytest fixtures
+
+tests/fixtures/              # Shared test fixtures
+├── Dockerfile               # SSH server image with echo server
+└── keys/                    # Pre-generated test keys
 
 scripts/
 ├── setup-tests.sh           # Build Docker test image
 └── generate-test-keys.sh    # Generate SSH keys for testing
-
-src/
-├── retry.rs                 # Unit testable retry logic
-└── cli.rs                   # Unit testable CLI parsing
 ```
 
 ### Running Tests
 
-1. Build the Docker test image:
-   ```bash
-   ./scripts/setup-tests.sh
-   ```
+**Unit Tests (Rust):**
+```bash
+cargo test
+```
 
-2. Run tests:
-   ```bash
-   cargo test
-   ```
+**E2E Tests (Python):**
+```bash
+# One-time setup
+./scripts/setup-tests.sh
+
+# Run from repo root (uses uv workspace)
+uv run pytest e2e-tests/
+uv run basedpyright e2e-tests/
+```
+
+### UV Workspace
+
+The project uses a **uv workspace** (similar to Cargo workspaces) to manage the Python E2E tests:
+
+```
+x2ssh/
+├── pyproject.toml          # Workspace root configuration
+├── uv.lock                 # Shared lockfile for entire workspace
+└── e2e-tests/
+    ├── pyproject.toml      # Package configuration (member of workspace)
+    └── src/x2ssh_e2e/      # Package source
+```
+
+**Key workspace features:**
+- Single lockfile (`uv.lock` at root) ensures consistent dependencies
+- Run commands from repo root with `uv run <command>`
+- No need to `cd` into e2e-tests directory
+- Works like `cargo` - workspace-aware commands from anywhere in the repo
 
 ### Docker Fixture
 

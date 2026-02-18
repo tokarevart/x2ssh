@@ -52,15 +52,27 @@ x2ssh -D 127.0.0.1:1080 --retry-max 10 --retry-delay 500 user@server.com
 
 ## Testing
 
-Build the Docker test image:
-```bash
-./scripts/setup-tests.sh
-```
+### Unit Tests
 
-Run tests:
+Run Rust unit tests:
 ```bash
 cargo test
 ```
+
+### End-to-End Tests
+
+E2E tests are in a separate Python project using pytest and testcontainers:
+
+```bash
+# Build the Docker test image first
+./scripts/setup-tests.sh
+
+# Run E2E tests
+cd e2e-tests
+uv run pytest
+```
+
+The E2E tests use `cargo run` to test the actual binary, providing true black-box testing.
 
 ## License
 

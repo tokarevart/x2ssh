@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "x2ssh-test-utils"]
+members = ["."]
 resolver = "2"
 
 [package]
@@ -32,4 +32,3 @@ tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 
 [dev-dependencies]
-x2ssh-test-utils = { path = "x2ssh-test-utils" }

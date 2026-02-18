@@ -14,6 +14,36 @@ use tracing::warn;
 
 use crate::retry::RetryPolicy;
 
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn transport_connect_invalid_host() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let key_path = manifest_dir.join("tests/fixtures/keys/id_ed25519");
+
+        let config = TransportConfig {
+            retry_policy: RetryPolicy {
+                max_attempts: Some(1),
+                initial_delay: Duration::from_millis(10),
+                backoff: 1.0,
+                max_delay: Duration::from_millis(10),
+            },
+            health_interval: Duration::from_secs(1),
+            key_path: Some(key_path),
+            user: "root".to_string(),
+            host: "255.255.255.255".to_string(),
+            port: 22,
+        };
+
+        let result = Transport::connect(config).await;
+        assert!(result.is_err(), "Connection to invalid host should fail");
+    }
+}
+
 struct Client;
 
 impl russh::client::Handler for Client {
