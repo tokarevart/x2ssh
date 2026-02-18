@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from testcontainers.core.container import DockerContainer
-from testcontainers.core.waiting_utils import wait_for_logs
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
 
 class SshContainer:
@@ -27,10 +27,9 @@ class SshContainer:
         _ = self.container.with_exposed_ports(22, 8080)
         _ = self.container.with_bind_ports(8080, 8080)  # Echo server
 
+        # Wait for SSH server to be ready before starting
+        self.container.waiting_for(LogMessageWaitStrategy("Server listening on"))
         _ = self.container.start()
-
-        # Wait for SSH server to be ready
-        _ = wait_for_logs(self.container, "Server listening on")
 
         # Get the mapped port
         self.port = self.container.get_exposed_port(22)
