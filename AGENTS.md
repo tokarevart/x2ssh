@@ -27,6 +27,13 @@ uv run pytest                       # Run all E2E tests
 uv run ty check                     # Type check with ty (Rust-based, fast)
 ```
 
+### Full Project Check
+
+```bash
+./scripts/check.sh                # Run all checks (Rust + Python)
+./scripts/check.sh -v             # Verbose mode with full output
+```
+
 ### Code Quality
 
 **Rust:**
