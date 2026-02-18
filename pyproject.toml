@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["e2e-tests"]
+members = ["tests-e2e"]
 
 [dependency-groups]
 dev = [

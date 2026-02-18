@@ -365,7 +365,7 @@ wheels = [
 [[package]]
 name = "x2ssh-e2e"
 version = "0.1.0"
-source = { virtual = "e2e-tests" }
+source = { virtual = "tests-e2e" }
 dependencies = [
     { name = "pysocks" },
     { name = "pytest" },

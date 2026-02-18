@@ -140,13 +140,26 @@ delay = min(initial_delay * backoff^attempt, max_delay)
 
 ## Dependencies
 
+**Rust:**
 | Crate | Purpose |
 |-------|---------|
 | `russh` | SSH client implementation |
-| `tokio` | Async runtime |
-| `clap` | CLI argument parsing |
-| `fast-socks5` | SOCKS5 protocol |
-| `tracing` | Logging |
+| `tokio` | Async runtime with multi-threaded executor |
+| `clap` | CLI argument parsing with derive macros |
+| `fast-socks5` | SOCKS5 protocol implementation |
+| `tracing` | Structured logging |
+| `tracing-subscriber` | Logging output formatting |
+| `anyhow` | Error handling |
+
+**Python (E2E tests):**
+| Package | Purpose |
+|---------|---------|
+| `pytest` | Test framework |
+| `pytest-asyncio` | Async test support |
+| `testcontainers` | Docker container management |
+| `pysocks` | SOCKS5 client for testing |
+| `ty` | Fast Rust-based type checker |
+| `ruff` | Fast Python linter and formatter |
 
 ## Security Considerations
 
@@ -176,25 +189,26 @@ This separation:
 src/
 ├── retry.rs                 # Unit tests for retry logic
 ├── transport.rs             # Unit tests for transport (no Docker needed)
-└── main.rs                  # Unit tests for CLI parsing
+├── socks.rs                 # SOCKS5 server implementation
+├── main.rs                  # CLI and main application logic
+└── lib.rs                   # Library entry point
 
 # Python E2E Project (separate uv-managed project)
-e2e-tests/
+tests-e2e/
 ├── pyproject.toml           # uv project configuration
-├── src/x2ssh_e2e/           # Test utilities
-│   ├── ssh_server.py        # Docker container wrapper
-│   └── socks5_client.py     # SOCKS5 test client
+├── ssh_server.py            # Docker container wrapper
+├── socks5_client.py         # SOCKS5 test client
 ├── tests/
 │   ├── test_socks5.py       # SOCKS5 proxy tests
 │   └── test_transport.py    # Transport/connection tests
-└── conftest.py              # pytest fixtures
-
-tests/fixtures/              # Shared test fixtures
-├── Dockerfile               # SSH server image with echo server
-└── keys/                    # Pre-generated test keys
+├── conftest.py              # pytest fixtures
+└── fixtures/                # Test fixtures
+    ├── Dockerfile           # SSH server image with echo server
+    └── keys/                # Pre-generated test keys
 
 scripts/
-├── setup-tests.sh           # Build Docker test image
+├── check.sh                 # Run all checks (Rust + Python)
+├── build-test-image.sh      # Build Docker test image
 └── generate-test-keys.sh    # Generate SSH keys for testing
 ```
 
@@ -208,11 +222,17 @@ cargo test
 **E2E Tests (Python):**
 ```bash
 # One-time setup
-./scripts/setup-tests.sh
+./scripts/build-test-image.sh
 
 # Run from repo root (uses uv workspace)
-uv run pytest e2e-tests/
-uv run basedpyright e2e-tests/
+uv run pytest
+uv run ty check           # Type check with ty (Rust-based, fast)
+```
+
+**Full Project Check:**
+```bash
+./scripts/check.sh        # Run all checks (Rust + Python)
+./scripts/check.sh -v     # Verbose mode with full output
 ```
 
 ### UV Workspace
@@ -223,7 +243,7 @@ The project uses a **uv workspace** (similar to Cargo workspaces) to manage the 
 x2ssh/
 ├── pyproject.toml          # Workspace root configuration
 ├── uv.lock                 # Shared lockfile for entire workspace
-└── e2e-tests/
+└── tests-e2e/
     ├── pyproject.toml      # Package configuration (member of workspace)
     └── src/x2ssh_e2e/      # Package source
 ```
@@ -231,7 +251,7 @@ x2ssh/
 **Key workspace features:**
 - Single lockfile (`uv.lock` at root) ensures consistent dependencies
 - Run commands from repo root with `uv run <command>`
-- No need to `cd` into e2e-tests directory
+- No need to `cd` into tests-e2e directory
 - Works like `cargo` - workspace-aware commands from anywhere in the repo
 
 ### Docker Fixture
@@ -243,7 +263,7 @@ x2ssh/
 
 ### SSH Keys Generation
 
-To regenerate the test SSH keys in `tests/fixtures/keys/`:
+To regenerate the test SSH keys in `tests-e2e/fixtures/keys/`:
 
 ```bash
 ./scripts/generate-test-keys.sh

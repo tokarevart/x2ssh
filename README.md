@@ -64,15 +64,23 @@ cargo test
 E2E tests are in a separate Python project using pytest and testcontainers:
 
 ```bash
-# Build the Docker test image first
-./scripts/setup-tests.sh
+# Build the Docker test image first (one-time setup)
+./scripts/build-test-image.sh
 
-# Run E2E tests
-cd e2e-tests
+# Run E2E tests (from repo root)
 uv run pytest
 ```
 
 The E2E tests use `cargo run` to test the actual binary, providing true black-box testing.
+
+### Full Project Check
+
+Run all checks (Rust unit tests, Python E2E tests, formatting, linting, type checking):
+
+```bash
+./scripts/check.sh           # Run all checks
+./scripts/check.sh -v        # Verbose mode with full output
+```
 
 ## License
 
