@@ -30,7 +30,7 @@ def ssh_container() -> Iterator[SshContainer]:
 @pytest.fixture
 def x2ssh_process(ssh_container: SshContainer) -> Iterator[dict[str, object]]:
     """Start x2ssh process and provide proxy address."""
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__).parent.parent
 
     # Find an available port for SOCKS5 proxy
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -57,8 +57,24 @@ def x2ssh_process(ssh_container: SshContainer) -> Iterator[dict[str, object]]:
         cmd, cwd=project_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
 
-    # Wait for proxy to be ready
-    time.sleep(1)
+    # Wait for proxy to be ready (check port is listening)
+    for _ in range(30):  # Wait up to 3 seconds
+        try:
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.settimeout(0.1)
+            test_sock.connect(("127.0.0.1", proxy_port))
+            test_sock.close()
+            break
+        except (socket.error, ConnectionRefusedError):
+            time.sleep(0.1)
+    else:
+        process.terminate()
+        stdout, stderr = process.communicate(timeout=5)
+        raise RuntimeError(
+            f"x2ssh proxy failed to start. "
+            f"STDOUT: {stdout.decode() if stdout else 'N/A'}, "
+            f"STDERR: {stderr.decode() if stderr else 'N/A'}"
+        )
 
     yield {"process": process, "proxy_host": "127.0.0.1", "proxy_port": proxy_port}
 
