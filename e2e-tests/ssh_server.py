@@ -19,7 +19,7 @@ class SshContainer:
     def start(self) -> "SshContainer":
         """Start the SSH container and return the host port."""
         # Get the path to the test fixtures
-        project_root = Path(__file__).parent.parent.parent.parent
+        project_root = Path(__file__).parent.parent
         fixtures_dir = project_root / "tests" / "fixtures"
         keys_dir = fixtures_dir / "keys"
 
@@ -68,5 +68,5 @@ class SshContainer:
 
     def get_key_path(self):
         """Return the path to the SSH private key."""
-        project_root = Path(__file__).parent.parent.parent.parent
+        project_root = Path(__file__).parent.parent
         return project_root / "tests" / "fixtures" / "keys" / "id_ed25519"

@@ -43,16 +43,13 @@ def x2ssh_process(ssh_container: SshContainer) -> Iterator[dict[str, object]]:
         "cargo",
         "run",
         "--",
-        "--host",
-        ssh_container.host(),
-        "--port",
-        str(ssh_container.get_port()),
-        "--user",
-        "root",
-        "--identity",
-        str(ssh_container.get_key_path()),
-        "--local",
+        "-D",
         f"127.0.0.1:{proxy_port}",
+        "-p",
+        str(ssh_container.get_port()),
+        "-i",
+        str(ssh_container.get_key_path()),
+        f"root@{ssh_container.host()}",
     ]
 
     # Start x2ssh process
@@ -84,6 +81,6 @@ def socks5_client(x2ssh_process: dict[str, object]) -> Socks5Client:
 
 
 @pytest.fixture
-def echo_server_addr(_ssh_container: SshContainer) -> tuple[str, int]:
+def echo_server_addr(ssh_container: SshContainer) -> tuple[str, int]:
     """Return the echo server address."""
     return ("127.0.0.1", 8080)

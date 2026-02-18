@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-KEYS_DIR="tests/fixtures/keys"
+KEYS_DIR="e2e-tests/fixtures/keys"
 mkdir -p "$KEYS_DIR"
 
 # Generate ED25519 key pair (no passphrase for automated testing)

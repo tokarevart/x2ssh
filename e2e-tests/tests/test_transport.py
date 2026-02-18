@@ -26,16 +26,13 @@ def test_transport_check_alive_succeeds(ssh_container: SshContainer) -> None:
         "cargo",
         "run",
         "--",
-        "--host",
-        ssh_container.host(),
-        "--port",
-        str(ssh_container.get_port()),
-        "--user",
-        "root",
-        "--identity",
-        str(ssh_container.get_key_path()),
-        "--local",
+        "-D",
         f"127.0.0.1:{proxy_port}",
+        "-p",
+        str(ssh_container.get_port()),
+        "-i",
+        str(ssh_container.get_key_path()),
+        f"root@{ssh_container.host()}",
     ]
 
     process = subprocess.Popen(
