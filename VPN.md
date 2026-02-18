@@ -8,8 +8,8 @@ VPN mode provides system-level tunnel for all TCP and UDP traffic, routing the e
 
 **Key Features:**
 - Full tunnel (default route) with configurable exclusions
-- TCP forwarding via existing SSH `direct-tcpip` channels
-- UDP forwarding via lightweight server-side agent
+- TCP and UDP forwarding via unified agent protocol
+- Single lightweight server-side agent handles all IP packets
 - Cross-platform client (Linux + Windows)
 - Linux server (standard SSH server, no special setup)
 - Automatic agent deployment and lifecycle management
@@ -42,35 +42,51 @@ Examples:
 ┌─────────────────────────────────────────────────────────────────┐
 │                        CLIENT (x2ssh)                           │
 │                                                                 │
-│  ┌─────────────┐     ┌──────────────┐     ┌─────────────────┐  │
-│  │ TUN Device  │────▶│ Packet Parse │────▶│  SSH Transport  │──┼──▶ SSH Server
-│  │ (tun-rs)    │     │ (etherparse) │     │    (russh)      │  │
-│  └─────────────┘     └──────────────┘     └─────────────────┘  │
+│  ┌─────────────┐     ┌──────────────┐     ┌─────────────────┐   │
+│  │ TUN Device  │────▶│   Protocol   │───▶│  SSH Channel    │───┼──▶ SSH Server
+│  │ (tun-rs)    │     │   Encoder    │     │  (exec stdin)   │   │    (exec)
+│  └─────────────┘     └──────────────┘     └─────────────────┘   │
 │         │                    │                      │           │
-│         │                    │                      │           │
-│    All network          TCP ──────▶ direct-tcpip   │           │
-│     traffic                                         │           │
-│   (via routing)         UDP ──────▶ Agent Channel  │           │
+│         │              All IP packets          Single SSH       │
+│    All network         (TCP + UDP)            exec channel      │
+│     traffic            encoded in                               │
+│   (via routing)        binary protocol                          │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
 │                      SERVER (Linux)                             │
 │                                                                 │
-│  ┌─────────────┐                ┌──────────────────────────┐   │
-│  │   SSHD      │───direct-tcpip─▶│   Target TCP Endpoints   │   │
-│  │ (existing)  │                └──────────────────────────┘   │
+│  ┌─────────────┐                                                │
+│  │   SSHD      │                                                │
+│  │ (existing)  │                                                │
 │  └──────┬──────┘                                                │
 │         │                                                       │
-│         │ exec channel                                          │
-│         │ (stdin/stdout)                                        │
+│         │ exec channel (stdin/stdout)                           │
 │         │                                                       │
-│  ┌──────▼──────┐                ┌──────────────────────────┐   │
-│  │ UDP Agent   │───UDP packets──▶│   Target UDP Endpoints   │   │
-│  │ (x2ssh-vpn) │                └──────────────────────────┘   │
-│  └─────────────┘                                                │
-│   Single process,                                               │
-│   manages all UDP flows                                         │
+│  ┌──────▼──────────────────────────────────────────────────┐   │
+│  │             VPN Agent (x2ssh-vpn)                        │   │
+│  │                                                          │   │
+│  │  ┌────────────┐      ┌──────────────┐                    │   │
+│  │  │  Protocol  │─────▶│  Raw Socket  │───────────────────┼──▶ Internet
+│  │  │  Decoder   │      │   Sender     │    IP packets      │   │
+│  │  └────────────┘      └──────────────┘                    │   │
+│  │         │                    │                           │   │
+│  │    Parse frames         Send via raw                     │   │
+│  │    from stdin           IP socket                        │   │
+│  │                                                          │   │
+│  │  ┌────────────┐      ┌──────────────┐                    │   │
+│  │  │  Protocol  │◀─────│  Raw Socket  │◀──────────────────┼─── Internet
+│  │  │  Encoder   │      │  Receiver    │   IP packets       │   │
+│  │  └────────────┘      └──────────────┘                    │   │
+│  │         │                                                │   │
+│  │    Write frames                                          │   │
+│  │    to stdout                                             │   │
+│  │                                                          │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  Single process handles ALL traffic (TCP + UDP + ICMP)          │
+│  via raw IP sockets                                             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -80,16 +96,26 @@ Examples:
 |--------|----------|-----------|
 | **Client Platform** | Linux + Windows | Cross-platform abstraction layer, test on Linux during dev |
 | **Server Platform** | Linux only | Simplifies agent, matches typical SSH server deployment |
-| **Agent Architecture** | Single long-lived agent | More efficient for VPN (many concurrent UDP flows) |
-| **IP Processing** | Parse packets, forward raw | Use etherparse, simple and low overhead |
+| **Agent Architecture** | Single agent with raw sockets | Handles all IP packets uniformly (TCP, UDP, ICMP) |
+| **Packet Forwarding** | Raw IP packets via agent | Unified approach for TCP and UDP, simpler than separate paths |
 | **Routing** | Full tunnel + exclusions | Default route through VPN, exclude SSH + user CIDRs |
-| **Privileges** | Require root/sudo | Simple approach, clearly documented |
-| **Agent Protocol** | Length-prefixed binary | 4-byte BE length + bincode payload, fast and compact |
+| **Privileges** | Client: root/sudo, Server: CAP_NET_RAW | Client needs TUN, server needs raw socket |
+| **Agent Protocol** | Length-prefixed raw IP packets | 4-byte BE length + raw IP packet, minimal overhead |
 | **Agent Channel** | SSH exec (stdin/stdout) | Simple, reuses existing SSH session |
-| **DNS** | Forward as UDP packets | Automatic, no special handling needed |
-| **MTU** | 1400 bytes | Conservative default, accounts for SSH overhead |
+| **DNS** | Forward as IP packets | Automatic, no special handling needed |
+| **MTU** | 1400 bytes | Conservative default, accounts for SSH + protocol overhead |
 | **Agent Deployment** | Base64 over SSH exec | No SFTP dependency, works everywhere |
 | **Error Handling** | Retry with backoff | Reuse existing retry policy for resilience |
+
+### Why This Design?
+
+**Raw IP Socket Forwarding:**
+- ✅ Kernel handles all protocol logic (TCP state, UDP ports, ICMP, etc.)
+- ✅ Agent is stateless and simple (~150 lines)
+- ✅ Supports ALL protocols (TCP, UDP, ICMP, IPv6, future protocols)
+- ✅ Minimal processing overhead - just framing and forwarding
+- ✅ No packet parsing or protocol-specific logic needed
+- ✅ Automatic support for advanced features (TCP options, fragmentation, etc.)
 
 ## Components
 
@@ -114,26 +140,58 @@ pub trait TunDevice: AsyncRead + AsyncWrite {
 }
 ```
 
-### 2. Packet Parser
+### 2. Protocol Encoder/Decoder
 
-**Library:** `etherparse` (zero-copy, no_std compatible)
+**Client Side:**
 
-**Logic:**
+No parsing needed on client - just frame raw IP packets from TUN and send to agent.
+
 ```rust
-async fn process_tun_packet(packet: &[u8]) -> Result<PacketAction> {
-    let parsed = etherparse::PacketHeaders::from_ip_slice(packet)?;
+async fn send_packet_to_agent(agent: &mut AgentHandle, packet: &[u8]) -> Result<()> {
+    // Simple length-prefixed framing
+    let len = (packet.len() as u32).to_be_bytes();
+    agent.stdin.write_all(&len).await?;
+    agent.stdin.write_all(packet).await?;
+    agent.stdin.flush().await?;
+    Ok(())
+}
+
+async fn recv_packet_from_agent(agent: &mut AgentHandle) -> Result<Vec<u8>> {
+    // Read length prefix
+    let mut len_buf = [0u8; 4];
+    agent.stdout.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf) as usize;
     
-    match parsed.transport {
-        Some(TransportHeader::Tcp(tcp)) => {
-            let dest = SocketAddr::new(parsed.ip.unwrap().destination_addr(), tcp.destination_port);
-            Ok(PacketAction::ForwardTcp { dest, payload: packet })
+    // Read packet
+    let mut packet = vec![0u8; len];
+    agent.stdout.read_exact(&mut packet).await?;
+    Ok(packet)
+}
+```
+
+**Server Side (Agent):**
+
+Same framing, but sends packets via raw IP socket.
+
+```rust
+async fn forward_packet(packet: &[u8], raw_socket: &RawSocket) -> Result<()> {
+    // Parse just enough to get destination IP
+    let ip_version = packet[0] >> 4;
+    let dest_ip = match ip_version {
+        4 => {
+            // IPv4: bytes 16-19 are destination
+            IpAddr::V4(Ipv4Addr::new(packet[16], packet[17], packet[18], packet[19]))
         }
-        Some(TransportHeader::Udp(udp)) => {
-            let dest = SocketAddr::new(parsed.ip.unwrap().destination_addr(), udp.destination_port);
-            Ok(PacketAction::ForwardUdp { dest, payload: packet })
+        6 => {
+            // IPv6: bytes 24-39 are destination
+            // ... parse IPv6 address
         }
-        _ => Ok(PacketAction::Drop), // ICMP, etc. - future enhancement
-    }
+        _ => return Err(anyhow!("Invalid IP version")),
+    };
+    
+    // Send raw IP packet
+    raw_socket.send_to(packet, dest_ip).await?;
+    Ok(())
 }
 ```
 
@@ -163,7 +221,7 @@ pub trait RouteManager {
 }
 ```
 
-### 4. Server-Side UDP Agent
+### 4. Server-Side VPN Agent
 
 **Binary:** `x2ssh-vpn-agent` (statically compiled with musl for Linux)
 
@@ -173,47 +231,75 @@ Agent Process (single, long-lived)
     │
     ├─ stdin/stdout ←→ SSH channel (x2ssh client)
     │
-    ├─ UDP Flow Map: HashMap<FlowId, UdpSocket>
-    │      FlowId = (src_addr, dst_addr)
+    ├─ Raw IP Socket (requires CAP_NET_RAW or root)
+    │      Sends and receives raw IP packets
     │
     └─ Tasks:
-        ├─ stdin reader: receive commands, spawn UDP flows
-        ├─ UDP receivers: per-flow tasks that read UDP and write to stdout
-        └─ Cleanup task: remove idle flows after timeout
+        ├─ stdin reader: receive framed IP packets, forward to network
+        └─ socket reader: receive IP packets from network, frame and send to stdout
 ```
 
 **Protocol:**
-```rust
-// Wire format: [4-byte BE length][bincode payload]
 
-#[derive(Serialize, Deserialize)]
-enum AgentCommand {
-    SendUdp {
-        flow_id: u64,
-        dest: SocketAddr,
-        payload: Vec<u8>,
-    },
-    CloseFlow {
-        flow_id: u64,
-    },
-    Shutdown,
+Extremely simple - just length-prefixed raw IP packets:
+
+```rust
+// Wire format: [4-byte BE length][raw IP packet]
+// No complex serialization needed - just framing!
+
+async fn run_agent() -> Result<()> {
+    // Create raw IP socket (AF_INET, SOCK_RAW, IPPROTO_RAW)
+    let raw_socket = create_raw_socket()?;
+    
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    
+    loop {
+        tokio::select! {
+            // Client → Network: Read packet from stdin, send via raw socket
+            packet = read_framed_packet(&mut stdin) => {
+                let packet = packet?;
+                forward_to_network(&raw_socket, &packet).await?;
+            }
+            
+            // Network → Client: Receive packet from network, write to stdout
+            packet = recv_from_network(&raw_socket) => {
+                let packet = packet?;
+                write_framed_packet(&mut stdout, &packet).await?;
+            }
+        }
+    }
 }
 
-#[derive(Serialize, Deserialize)]
-enum AgentResponse {
-    UdpReceived {
-        flow_id: u64,
-        from: SocketAddr,
-        payload: Vec<u8>,
-    },
-    FlowClosed {
-        flow_id: u64,
-    },
-    Error {
-        message: String,
-    },
+async fn read_framed_packet(reader: &mut impl AsyncRead) -> Result<Vec<u8>> {
+    let mut len_buf = [0u8; 4];
+    reader.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    
+    let mut packet = vec![0u8; len];
+    reader.read_exact(&mut packet).await?;
+    Ok(packet)
+}
+
+async fn write_framed_packet(writer: &mut impl AsyncWrite, packet: &[u8]) -> Result<()> {
+    let len = (packet.len() as u32).to_be_bytes();
+    writer.write_all(&len).await?;
+    writer.write_all(packet).await?;
+    writer.flush().await?;
+    Ok(())
+}
+
+fn create_raw_socket() -> Result<RawSocket> {
+    // socket(AF_INET, SOCK_RAW, IPPROTO_RAW)
+    // Requires CAP_NET_RAW capability or root
 }
 ```
+
+**Key Simplifications:**
+- No need to parse packet types (TCP/UDP/ICMP) - kernel handles it
+- No need to maintain flow state - stateless forwarding
+- No need for complex protocol - just framing
+- Client-side IP stack handles TCP state, UDP ports, etc.
 
 **Deployment Strategy:**
 - Binary embedded in x2ssh at compile time using `include_bytes!`
@@ -228,21 +314,69 @@ enum AgentResponse {
 1. User runs: sudo x2ssh --vpn user@server.com
 2. x2ssh connects via SSH (existing transport)
 3. Create TUN interface (platform-specific)
-4. Deploy UDP agent to server
+4. Deploy VPN agent to server
 5. Start agent via SSH exec
 6. Configure routing (default route + exclusions)
 7. Main loop:
-   - Read packets from TUN
-   - Parse and classify (TCP vs UDP)
-   - Forward TCP via direct-tcpip
-   - Forward UDP via agent
-   - Write responses back to TUN
+   - Read IP packets from TUN
+   - Frame and send to agent (stdin)
+   - Read framed packets from agent (stdout)
+   - Write IP packets back to TUN
 8. On shutdown:
    - Restore original routing
    - Stop agent
    - Delete agent binary
    - Close TUN interface
 ```
+
+**Main Loop Implementation:**
+
+```rust
+async fn run_vpn_session(
+    mut tun: impl TunDevice,
+    mut agent: AgentHandle,
+) -> Result<()> {
+    let (mut tun_rx, mut tun_tx) = tun.split();
+    let mut packet_buf = vec![0u8; 2048]; // MTU + IP headers
+    
+    loop {
+        tokio::select! {
+            // TUN → Agent: Read from TUN, send to agent
+            n = tun_rx.read(&mut packet_buf) => {
+                let packet = &packet_buf[..n?];
+                
+                // Frame and send to agent
+                let len = (packet.len() as u32).to_be_bytes();
+                agent.stdin.write_all(&len).await?;
+                agent.stdin.write_all(packet).await?;
+                agent.stdin.flush().await?;
+            }
+            
+            // Agent → TUN: Read from agent, write to TUN
+            packet = read_framed_packet(&mut agent.stdout) => {
+                let packet = packet?;
+                tun_tx.write_all(&packet).await?;
+            }
+            
+            // Ctrl+C or disconnect signal
+            _ = signal::ctrl_c() => {
+                break;
+            }
+        }
+    }
+    
+    cleanup_vpn_session().await?;
+    Ok(())
+}
+```
+
+**Key Benefits of This Approach:**
+
+1. **Simplicity**: No need to distinguish TCP vs UDP on client or server
+2. **Completeness**: Automatically supports ICMP, IPv6, and any future protocols
+3. **Stateless**: Agent doesn't track flows, connections, or state
+4. **Performance**: Minimal processing - just framing and raw socket I/O
+5. **Correctness**: Kernel handles all protocol logic (TCP state machine, UDP ports, checksums, etc.)
 
 ## Project Structure
 
@@ -264,31 +398,26 @@ x2ssh/
 │   │           ├── mod.rs
 │   │           ├── tun.rs        # TUN abstraction
 │   │           ├── router.rs     # Routing abstraction
-│   │           ├── packet.rs     # Packet parsing
+│   │           ├── framing.rs    # Length-prefixed framing (shared with agent)
 │   │           ├── session.rs    # VPN session management
-│   │           └── agent.rs      # Agent communication
+│   │           └── agent.rs      # Agent deployment & communication
 │   │
-│   ├── x2ssh-vpn-agent/          # Server-side UDP agent
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── main.rs
-│   │       ├── protocol.rs       # Shared protocol types
-│   │       └── udp_flow.rs       # UDP flow management
-│   │
-│   └── x2ssh-common/             # Shared types (protocol definitions)
+│   └── x2ssh-vpn-agent/          # Server-side VPN agent
 │       ├── Cargo.toml
 │       └── src/
-│           ├── lib.rs
-│           └── protocol.rs       # AgentCommand, AgentResponse
+│           ├── main.rs           # Simple raw socket forwarder (~150 lines)
+│           └── raw_socket.rs     # Raw IP socket wrapper
 │
 ├── tests-e2e/
 │   └── tests/
 │       └── test_vpn.py           # VPN E2E tests
 ```
 
+**Note:** No shared `x2ssh-common` crate needed! The protocol is so simple (just length-prefixed framing) that both sides can implement it independently.
+
 ## Implementation Phases
 
-### Phase 1: Foundation & Agent (2-3 weeks)
+### Phase 1: Foundation & Agent
 
 **Goal:** Server-side agent + protocol + basic client scaffolding
 
@@ -304,7 +433,7 @@ x2ssh/
 
 ---
 
-### Phase 2: TUN Interface & Routing (Linux Only) (2 weeks)
+### Phase 2: TUN Interface & Routing (Linux Only)
 
 **Goal:** TUN device creation + routing configuration on Linux client
 
@@ -321,37 +450,25 @@ x2ssh/
 
 ---
 
-### Phase 3: Packet Processing & TCP Forwarding (2 weeks)
+### Phase 3: Agent Integration & Packet Forwarding
 
-**Goal:** Parse packets from TUN, forward TCP via SSH
-
-**Tasks:**
-- [ ] Add `etherparse` dependency
-- [ ] Implement packet parser
-- [ ] Refactor TCP forwarding for VPN mode
-- [ ] Implement TUN → TCP → SSH flow
-- [ ] E2E test: HTTP request through VPN
-
-**Deliverables:** TCP traffic working through VPN
-
----
-
-### Phase 4: UDP Forwarding via Agent (2 weeks)
-
-**Goal:** Forward UDP packets through agent
+**Goal:** Simple packet forwarding through agent (all protocols unified)
 
 **Tasks:**
-- [ ] Integrate agent deployment
-- [ ] Implement UDP packet forwarding
-- [ ] Handle DNS queries (port 53)
+- [ ] Implement length-prefixed framing (client + agent)
+- [ ] Implement agent raw socket logic
+- [ ] Build agent with musl static linking
+- [ ] Integrate agent deployment into VPN session
+- [ ] Implement TUN → Agent → Network flow
+- [ ] Implement Network → Agent → TUN flow
 - [ ] Agent error handling + reconnection
-- [ ] E2E tests: DNS, UDP echo, concurrent flows
+- [ ] E2E tests: HTTP (TCP), DNS (UDP), ping (ICMP)
 
-**Deliverables:** Full VPN with TCP + UDP on Linux
+**Deliverables:** Full VPN with TCP + UDP + ICMP on Linux
 
 ---
 
-### Phase 5: Windows Support (3 weeks)
+### Phase 4: Windows Support
 
 **Goal:** Cross-platform TUN and routing for Windows client
 
@@ -367,7 +484,7 @@ x2ssh/
 
 ---
 
-### Phase 6: Polish & Optimization (2 weeks)
+### Phase 5: Polish & Optimization
 
 **Goal:** Production-ready VPN mode
 
@@ -380,10 +497,6 @@ x2ssh/
 - [ ] Security audit
 
 **Deliverables:** Production-ready VPN
-
----
-
-**Total Timeline:** 13-14 weeks (~3 months)
 
 ## Dependencies
 
@@ -400,10 +513,8 @@ clap = { version = "4.5", features = ["derive"] }
 
 # VPN
 tun-rs = { version = "2.8", features = ["async"] }
-etherparse = "0.19"
 base64 = "0.22"
 rand = "0.8"
-x2ssh-common = { path = "../x2ssh-common" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rtnetlink = "0.20"
@@ -421,20 +532,21 @@ windows-sys = { version = "0.59", features = [
 
 ```toml
 [dependencies]
-tokio = { version = "1.45", features = ["rt", "net", "io-std", "time", "macros"] }
+tokio = { version = "1.45", features = ["rt", "net", "io-std", "macros"] }
 anyhow = "1.0"
-bincode = "1.3"
-serde = { version = "1.0", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
-x2ssh-common = { path = "../x2ssh-common" }
+libc = "0.2"  # For raw socket creation
 
 [profile.release]
 strip = true
 lto = true
 codegen-units = 1
 panic = "abort"
+opt-level = "z"  # Optimize for size
 ```
+
+**Note:** Agent is extremely lightweight - no serialization framework needed, just raw sockets and framing!
 
 ### Why These Crates?
 
@@ -444,13 +556,6 @@ panic = "abort"
 - Hardware offload support (TSO/GSO)
 - Active maintenance (last release Feb 2026)
 - Excellent documentation
-
-**`etherparse`** (v0.19):
-- Zero-copy packet parsing
-- Minimal dependencies (just `arrayvec`)
-- no_std compatible
-- Active maintenance (last release Aug 2025)
-- Clean API for IP/TCP/UDP parsing
 
 **`rtnetlink`** (v0.20):
 - Linux netlink API for routing
@@ -462,10 +567,10 @@ panic = "abort"
 
 ### Agent Isolation
 
-- [ ] Agent runs with user privileges (no root)
-- [ ] Agent only accepts connections from x2ssh (via SSH)
+- [ ] Agent requires `CAP_NET_RAW` capability (or root) for raw sockets
+- [ ] Agent only accepts connections from x2ssh (via SSH exec channel)
 - [ ] Agent cleans up temp files on exit
-- [ ] Agent validates all inputs from protocol
+- [ ] Agent validates packet lengths (prevent buffer overflow)
 
 ### Route Leak Prevention
 
@@ -491,26 +596,28 @@ panic = "abort"
 
 | Metric | Target | Notes |
 |--------|--------|-------|
-| TCP Throughput | >100 Mbps | Limited by SSH encryption |
-| UDP Throughput | >50 Mbps | Limited by agent protocol |
-| Latency Overhead | <10ms | Compared to direct connection |
+| TCP Throughput | >100 Mbps | Limited by SSH encryption overhead |
+| UDP Throughput | >100 Mbps | Same path as TCP, should be similar |
+| Latency Overhead | <5ms | Minimal processing (just framing) |
 | Connection Setup | <2s | SSH + agent deploy + routing |
-| Memory Usage | <50 MB | Client + agent combined |
-| CPU Usage | <10% | At 50 Mbps throughput |
+| Memory Usage | <20 MB | Client + agent combined (minimal buffering) |
+| CPU Usage | <5% | At 100 Mbps throughput (no parsing/reassembly) |
+
+**Note:** Performance should be significantly better than complex approaches since we're just framing and forwarding raw packets.
 
 ## Future Enhancements
 
 ### Post-MVP Features
 
 1. **IPv6 Support**
-   - Full IPv6 packet forwarding
-   - IPv6 routing configuration
-   - Dual-stack handling
+   - Add IPv6 routing configuration
+   - Agent already supports IPv6 (raw socket handles both)
+   - Just need routing table updates
 
-2. **ICMP Support**
-   - Ping through VPN
-   - Traceroute support
-   - Requires raw socket on server
+2. **ICMP Already Supported!**
+   - Ping works out of the box (raw socket forwards ICMP)
+   - Traceroute works automatically
+   - No additional work needed
 
 3. **Split DNS**
    - `--vpn-dns` flag for remote DNS
