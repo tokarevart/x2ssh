@@ -1,0 +1,13 @@
+[package]
+name = "x2ssh-agent"
+version = "0.1.0"
+edition = "2024"
+authors = ["Artem Tokarev <tokarev28.art@gmail.com>"]
+license = "MIT"
+description = "Server-side VPN agent for x2ssh"
+repository = "https://github.com/tokarevart/x2ssh"
+
+[dependencies]
+anyhow = "1.0.98"
+tokio = { version = "1.45.1", features = ["rt", "io-std", "macros", "fs"] }
+libc = "0.2"

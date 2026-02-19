@@ -192,13 +192,17 @@ This separation:
 ### Project Structure
 
 ```
-# Rust Project (unit tests only)
-src/
-├── retry.rs                 # Unit tests for retry logic
-├── transport.rs             # Unit tests for transport (no Docker needed)
-├── socks.rs                 # SOCKS5 server implementation
-├── main.rs                  # CLI and main application logic
-└── lib.rs                   # Library entry point
+# Rust Workspace
+x2ssh/                       # Main binary
+└── src/
+    ├── retry.rs             # Unit tests for retry logic
+    ├── transport.rs         # Unit tests for transport (no Docker needed)
+    ├── socks.rs             # SOCKS5 server implementation
+    ├── main.rs              # CLI and main application logic
+    └── lib.rs               # Library entry point
+x2ssh-agent/                 # Server-side VPN agent (deployed over SSH)
+└── src/
+    └── main.rs              # Simple TUN bridge (~100 lines)
 
 # Python Integration Tests (separate uv-managed project)
 tests/

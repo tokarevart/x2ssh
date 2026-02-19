@@ -165,7 +165,7 @@ Examples:
 │         │ exec channel (stdin/stdout)                        │
 │         │                                                    │
 │  ┌──────▼─────────────────────────────────────────────┐      │
-│  │         VPN Agent (x2ssh-vpn)                      │      │
+│  │         VPN Agent (x2ssh-agent)                    │      │
 │  │                                                    │      │
 │  │   stdin ──▶ Deframe ──▶ TUN ──▶ Kernel ──▶ Net   │──────┼──▶ Internet
 │  │                          ↕                         │      │
@@ -291,7 +291,7 @@ pre_down = [
 
 ### 3. VPN Agent (Server-Side)
 
-**Binary:** `x2ssh-vpn` (statically compiled with musl for Linux)
+**Binary:** `x2ssh-agent` (statically compiled with musl for Linux)
 
 **Simple TUN bridge - no complex logic:**
 
@@ -438,29 +438,28 @@ The cleanup command:
 ```
 x2ssh/
 ├── Cargo.toml                    # Workspace root
-├── crates/
-│   ├── x2ssh/                    # Main binary
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── main.rs
-│   │       ├── lib.rs
-│   │       ├── config.rs         # Config file parsing (TOML)
-│   │       ├── socks.rs          # SOCKS5 mode
-│   │       ├── transport.rs      # SSH transport
-│   │       ├── retry.rs          # Retry policy
-│   │       └── vpn.rs            # VPN module (declares submodules)
-│   │       └── vpn/
-│   │           ├── tun.rs        # Client TUN (Linux impl, Windows stubs)
-│   │           ├── routing.rs    # Client routing (Linux impl, Windows stubs)
-│   │           ├── framing.rs    # Length-prefixed framing
-│   │           ├── session.rs    # VPN session management
-│   │           ├── hooks.rs      # PostUp/PreDown execution
-│   │           └── agent.rs      # Agent deployment
-│   │
-│   └── x2ssh-vpn/                # Server-side agent
-│       ├── Cargo.toml
-│       └── src/
-│           └── main.rs           # Simple TUN bridge (~100 lines)
+├── x2ssh/                        # Main binary
+│   ├── Cargo.toml
+│   └── src/
+│       ├── main.rs
+│       ├── lib.rs
+│       ├── config.rs             # Config file parsing (TOML)
+│       ├── socks.rs              # SOCKS5 mode
+│       ├── transport.rs          # SSH transport
+│       ├── retry.rs              # Retry policy
+│       └── vpn.rs                # VPN module (declares submodules)
+│       └── vpn/
+│           ├── tun.rs            # Client TUN (Linux impl, Windows stubs)
+│           ├── routing.rs        # Client routing (Linux impl, Windows stubs)
+│           ├── framing.rs        # Length-prefixed framing
+│           ├── session.rs        # VPN session management
+│           ├── hooks.rs          # PostUp/PreDown execution
+│           └── agent.rs          # Agent deployment
+│
+└── x2ssh-agent/                  # Server-side agent
+    ├── Cargo.toml
+    └── src/
+        └── main.rs               # Simple TUN bridge (~100 lines)
 │
 ├── tests/
 │   ├── vpn_client.py             # VPN client wrapper
@@ -479,7 +478,7 @@ x2ssh/
 **Goal:** Server-side agent + basic config parsing
 
 **Tasks:**
-- [ ] Create workspace structure
+- [x] Create workspace structure (`x2ssh`, `x2ssh-agent`)
 - [ ] Add `directories` crate for config path
 - [ ] Implement TOML config parsing (with CLI override)
 - [ ] Implement simple TUN bridge agent
@@ -582,7 +581,7 @@ x2ssh/
 
 ## Dependencies
 
-### Main Binary (`crates/x2ssh`)
+### Main Binary (`x2ssh`)
 
 ```toml
 [dependencies]
@@ -612,7 +611,7 @@ windows-sys = { version = "0.59", features = [
 ] }
 ```
 
-### Agent Binary (`crates/x2ssh-vpn`)
+### Agent Binary (`x2ssh-agent`)
 
 ```toml
 [dependencies]
@@ -712,7 +711,7 @@ Docker Network: x2ssh-test-net (10.10.0.0/24)
 │  IP: 10.10.0.10         │◄─────►│  IP: 10.10.0.20                  │
 │  (privileged)           │        │  (privileged)                    │
 │                         │        │                                  │
-│  - x2ssh --vpn          │        │  - sshd + x2ssh-vpn agent        │
+│  - x2ssh --vpn          │        │  - sshd + x2ssh-agent            │
 │  - TUN: 10.8.0.2/24     │        │  - TUN: 10.8.0.1/24              │
 │  - Test tools           │        │  - iptables MASQUERADE           │
 │                         │        │  - TCP echo (socat port 8080)    │
@@ -819,7 +818,7 @@ def vpn_containers(vpn_docker_network):
     """Start VPN test containers."""
     # Start server-target container (10.10.0.20)
     # Start client container (10.10.0.10)
-    # Build and copy x2ssh + x2ssh-vpn binaries
+    # Build and copy x2ssh + x2ssh-agent binaries
 
 @pytest.fixture
 def vpn_session(vpn_containers):

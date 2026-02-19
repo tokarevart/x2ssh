@@ -6,7 +6,7 @@
 
 **Key Principle**: Split testing - Rust unit tests (fast) + Python integration tests (Docker-based)
 
-**Current Phase**: Phase 2 complete (SOCKS5), Phase 3 planned (VPN - see VPN.md)
+**Current Phase**: Phase 1 in progress (VPN foundation - workspace restructured, agent crate created)
 
 ## Essential Commands
 
@@ -64,7 +64,10 @@ uv run ty check                 # Type check
 
 ```
 x2ssh/
-├── src/                      # Rust source (main, lib, retry, socks, transport)
+├── x2ssh/                    # Main binary (SOCKS5 proxy + VPN client)
+│   └── src/                  # main.rs, lib.rs, retry.rs, socks.rs, transport.rs
+├── x2ssh-agent/              # Server-side VPN agent (deployed over SSH)
+│   └── src/main.rs
 ├── tests/                    # Python integration tests (uv workspace member)
 │   ├── tests/                # Test files
 │   └── fixtures/             # SSH keys, Dockerfile

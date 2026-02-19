@@ -23,7 +23,7 @@ mod tests {
     #[tokio::test]
     async fn transport_connect_invalid_host() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let key_path = manifest_dir.join("tests/fixtures/keys/id_ed25519");
+        let key_path = manifest_dir.join("../tests/fixtures/keys/id_ed25519");
 
         let config = TransportConfig {
             retry_policy: RetryPolicy {

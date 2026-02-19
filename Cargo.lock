@@ -2842,6 +2842,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "x2ssh-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "tokio",
+]
+
+[[package]]
 name = "zerocopy"
 version = "0.8.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
