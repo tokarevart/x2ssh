@@ -18,13 +18,12 @@ VPN mode provides system-level tunnel for all TCP and UDP traffic, routing the e
 
 ### Config File Location
 
-Uses platform-appropriate config directory via `directories` crate:
+**Note:** Platform-specific config directory auto-discovery is deferred to Phase 6. For MVP, config files must be specified explicitly via `--config <FILE>` flag.
 
+When implemented (Phase 6), config will be loaded from:
 - **Linux**: `~/.config/x2ssh/config.toml`
 - **macOS**: `~/Library/Application Support/x2ssh/config.toml`
 - **Windows**: `C:\Users\<user>\AppData\Roaming\x2ssh\config.toml`
-
-Override with `--config <FILE>` flag.
 
 ### Example Config File
 
@@ -70,7 +69,7 @@ port = 22
 
 [retry]
 # Retry policy for SSH reconnection
-max_attempts = 0  # 0 = infinite
+max_attempts = "inf"  # Use "inf" or a positive number
 initial_delay_ms = 1000
 backoff = 2.0
 max_delay_ms = 30000
@@ -479,7 +478,7 @@ x2ssh/
 
 **Tasks:**
 - [x] Create workspace structure (`x2ssh`, `x2ssh-agent`)
-- [ ] Add `directories` crate for config path
+- [x] ~~Add `directories` crate for config path~~ (deferred to Phase 6, `--config` only for MVP)
 - [ ] Implement TOML config parsing (with CLI override)
 - [ ] Implement simple TUN bridge agent
 - [ ] Build script for musl static linking
@@ -593,7 +592,6 @@ tracing = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 
 # Config
-directories = "5.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 
