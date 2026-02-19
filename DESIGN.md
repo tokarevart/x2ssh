@@ -193,6 +193,9 @@ This separation:
 
 ```
 # Rust Workspace
+proto/                       # Shared protocol code
+└── src/
+    └── framing.rs           # Length-prefixed packet framing
 x2ssh/                       # Main binary
 └── src/
     ├── retry.rs             # Unit tests for retry logic

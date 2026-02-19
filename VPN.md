@@ -437,6 +437,11 @@ The cleanup command:
 ```
 x2ssh/
 ├── Cargo.toml                    # Workspace root
+├── proto/                        # Shared protocol code
+│   ├── Cargo.toml
+│   └── src/
+│       └── framing.rs            # Length-prefixed packet framing
+│
 ├── x2ssh/                        # Main binary
 │   ├── Cargo.toml
 │   └── src/
@@ -450,7 +455,6 @@ x2ssh/
 │       └── vpn/
 │           ├── tun.rs            # Client TUN (Linux impl, Windows stubs)
 │           ├── routing.rs        # Client routing (Linux impl, Windows stubs)
-│           ├── framing.rs        # Length-prefixed framing
 │           ├── session.rs        # VPN session management
 │           ├── hooks.rs          # PostUp/PreDown execution
 │           └── agent.rs          # Agent deployment

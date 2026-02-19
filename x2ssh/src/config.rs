@@ -4,8 +4,11 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct AppConfig {
+    #[serde(default)]
     pub vpn: VpnConfig,
+    #[serde(default)]
     pub connection: ConnectionConfig,
+    #[serde(default)]
     pub retry: RetryConfig,
 }
 
@@ -17,7 +20,7 @@ impl AppConfig {
     }
 }
 
-#[derive(Default, Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct VpnConfig {
     #[serde(default = "default_subnet")]
     pub subnet: String,
@@ -27,9 +30,26 @@ pub struct VpnConfig {
     pub client_tun: String,
     #[serde(default = "default_mtu")]
     pub mtu: u16,
+    #[serde(default)]
     pub exclude: Vec<String>,
+    #[serde(default)]
     pub post_up: Vec<String>,
+    #[serde(default)]
     pub pre_down: Vec<String>,
+}
+
+impl Default for VpnConfig {
+    fn default() -> Self {
+        Self {
+            subnet: default_subnet(),
+            server_tun: default_server_tun(),
+            client_tun: default_client_tun(),
+            mtu: default_mtu(),
+            exclude: Vec::new(),
+            post_up: Vec::new(),
+            pre_down: Vec::new(),
+        }
+    }
 }
 
 fn default_subnet() -> String {
@@ -48,18 +68,27 @@ fn default_mtu() -> u16 {
     1400
 }
 
-#[derive(Default, Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ConnectionConfig {
     #[serde(default = "default_port")]
     pub port: u16,
+}
+
+impl Default for ConnectionConfig {
+    fn default() -> Self {
+        Self {
+            port: default_port(),
+        }
+    }
 }
 
 fn default_port() -> u16 {
     22
 }
 
-#[derive(Default, Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RetryConfig {
+    #[serde(default)]
     pub max_attempts: MaxAttempts,
     #[serde(default = "default_initial_delay_ms")]
     pub initial_delay_ms: u64,
@@ -69,6 +98,18 @@ pub struct RetryConfig {
     pub max_delay_ms: u64,
     #[serde(default = "default_health_interval_ms")]
     pub health_interval_ms: u64,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: MaxAttempts::default(),
+            initial_delay_ms: default_initial_delay_ms(),
+            backoff: default_backoff(),
+            max_delay_ms: default_max_delay_ms(),
+            health_interval_ms: default_health_interval_ms(),
+        }
+    }
 }
 
 fn default_initial_delay_ms() -> u64 {

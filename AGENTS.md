@@ -64,6 +64,9 @@ uv run ty check                 # Type check
 
 ```
 x2ssh/
+├── proto/                    # Shared protocol code (framing, version negotiation)
+│   └── src/
+│       └── framing.rs        # Length-prefixed packet framing
 ├── x2ssh/                    # Main binary (SOCKS5 proxy + VPN client)
 │   └── src/                  # main.rs, lib.rs, retry.rs, socks.rs, transport.rs
 ├── x2ssh-agent/              # Server-side VPN agent (deployed over SSH)

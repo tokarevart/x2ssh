@@ -1,5 +1,5 @@
 [workspace]
-members = ["x2ssh", "x2ssh-agent"]
+members = ["proto", "x2ssh", "x2ssh-agent"]
 default-members = ["x2ssh"]
 resolver = "2"
 

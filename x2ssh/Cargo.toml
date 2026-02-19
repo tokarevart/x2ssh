@@ -14,6 +14,7 @@ categories = ["network-programming", "command-line-utilities"]
 anyhow = "1.0.98"
 clap = { version = "4.5.40", features = ["derive"] }
 fast-socks5 = "1.0.0"
+proto = { path = "../proto" }
 russh = "0.57.0"
 serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1.45.1", features = [

@@ -1676,6 +1676,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "proto"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tokio",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2937,6 +2945,7 @@ dependencies = [
  "anyhow",
  "clap",
  "fast-socks5",
+ "proto",
  "russh",
  "serde",
  "tempfile",
@@ -2952,6 +2961,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "libc",
+ "proto",
  "tokio",
 ]
 
