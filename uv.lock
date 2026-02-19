@@ -4,7 +4,7 @@ requires-python = ">=3.12"
 
 [manifest]
 members = [
-    "x2ssh-e2e",
+    "x2ssh-tests",
 ]
 
 [manifest.dependency-groups]
@@ -363,9 +363,9 @@ wheels = [
 ]
 
 [[package]]
-name = "x2ssh-e2e"
+name = "x2ssh-tests"
 version = "0.1.0"
-source = { virtual = "tests-e2e" }
+source = { virtual = "tests" }
 dependencies = [
     { name = "pysocks" },
     { name = "pytest" },

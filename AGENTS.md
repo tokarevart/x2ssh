@@ -2,9 +2,9 @@
 
 ## Quick Reference
 
-**Project**: SOCKS5 proxy and VPN tunnel using SSH transport (Rust + Python E2E tests)
+**Project**: SOCKS5 proxy and VPN tunnel using SSH transport (Rust + Python integration tests)
 
-**Key Principle**: Split testing - Rust unit tests (fast) + Python E2E tests (Docker-based)
+**Key Principle**: Split testing - Rust unit tests (fast) + Python integration tests (Docker-based)
 
 **Current Phase**: Phase 2 complete (SOCKS5), Phase 3 planned (VPN - see VPN.md)
 
@@ -23,9 +23,9 @@ cargo run -- -D 127.0.0.1:1080 user@server.com
 # Unit tests (fast, no Docker)
 cargo test
 
-# E2E tests (requires Docker, run from repo root)
+# Integration tests (requires Docker, run from repo root)
 ./scripts/build-test-image.sh         # One-time setup
-uv run pytest                         # Run all E2E tests
+uv run pytest                         # Run all integration tests
 uv run ty check                       # Type check with ty (Rust-based, fast)
 ```
 
@@ -44,7 +44,7 @@ cargo fmt
 cargo clippy
 ```
 
-**Python (E2E tests):**
+**Python (integration tests):**
 ```bash
 uv run ruff format              # Format code
 uv run ruff check               # Lint
@@ -53,10 +53,10 @@ uv run ty check                 # Type check
 
 ## Critical Rules
 
-1. **NO testcontainers in Rust** - E2E testing moved to Python
-2. **E2E tests use `cargo run`** - Test actual binary, not internals
-3. **Keep fixtures in `tests-e2e/fixtures/`** - SSH keys, Dockerfile
-4. **Run `./scripts/build-test-image.sh` before first E2E test**
+1. **NO testcontainers in Rust** - Integration testing moved to Python
+2. **Integration tests use `cargo run`** - Test actual binary, not internals
+3. **Keep fixtures in `tests/fixtures/`** - SSH keys, Dockerfile
+4. **Run `./scripts/build-test-image.sh` before first integration test**
 5. **After making changes, run `./scripts/check.sh`** - Verifies all quality checks pass
 6. **Module structure: Use `module.rs` instead of `module/mod.rs`** - For cleaner file organization
 
@@ -65,7 +65,7 @@ uv run ty check                 # Type check
 ```
 x2ssh/
 ├── src/                      # Rust source (main, lib, retry, socks, transport)
-├── tests-e2e/                # Python E2E tests (uv workspace member)
+├── tests/                    # Python integration tests (uv workspace member)
 │   ├── tests/                # Test files
 │   └── fixtures/             # SSH keys, Dockerfile
 ├── scripts/                  # check.sh, build-test-image.sh, generate-test-keys.sh
@@ -76,10 +76,13 @@ x2ssh/
 
 - **Rust**: Pure logic, no network needed
 - **Python**: Full workflows, network behavior, binary testing
+  - SOCKS5: Tests proxy forwarding via echo server in SSH container
+  - VPN (planned): Tests tunnel via 2 containers (client + server-target with echo services)
 
 ## Troubleshooting
 
-- E2E fails? Check: `docker ps`, `./scripts/build-test-image.sh`, `tests-e2e/fixtures/keys/`
+- Tests fail? Check: `docker ps`, `./scripts/build-test-image.sh`, `tests/fixtures/keys/`
+- VPN tests fail? Check: containers are privileged, docker network created
 
 ## Release Checklist
 

@@ -1,4 +1,4 @@
-"""Pytest configuration and fixtures for x2ssh e2e tests."""
+"""Pytest configuration and fixtures for x2ssh integration tests."""
 
 import socket
 import subprocess

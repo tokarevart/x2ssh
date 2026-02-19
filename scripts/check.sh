@@ -98,11 +98,11 @@ if ! run_check "Python type checking" "uv run ty check"; then
 fi
 
 echo ""
-echo "=== E2E Tests ==="
+echo "=== Integration Tests ==="
 echo ""
 
-# E2E tests (requires Docker)
-if ! run_check "E2E tests" "uv run pytest"; then
+# Integration tests (requires Docker)
+if ! run_check "Integration tests" "uv run pytest"; then
     FAILED=1
 fi
 

@@ -2,6 +2,6 @@
 set -e
 
 echo "Building x2ssh-test-sshd Docker image..."
-docker build -t x2ssh-test-sshd tests-e2e/fixtures/
+docker build -t x2ssh-test-sshd tests/fixtures/
 
-echo "Done. You can now run E2E tests with 'uv run pytest'."
+echo "Done. You can now run integration tests with 'uv run pytest'."

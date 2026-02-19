@@ -1,4 +1,4 @@
-"""SOCKS5 end-to-end tests for x2ssh."""
+"""SOCKS5 integration tests for x2ssh."""
 
 import threading
 

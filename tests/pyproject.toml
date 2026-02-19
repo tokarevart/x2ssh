@@ -1,7 +1,7 @@
 [project]
-name = "x2ssh-e2e"
+name = "x2ssh-tests"
 version = "0.1.0"
-description = "End-to-end tests for x2ssh"
+description = "Integration tests for x2ssh"
 requires-python = ">=3.12"
 dependencies = [
     "pysocks>=1.7.1",

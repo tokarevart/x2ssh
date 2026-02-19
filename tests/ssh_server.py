@@ -1,4 +1,4 @@
-"""SSH container management for x2ssh e2e tests."""
+"""SSH container management for x2ssh integration tests."""
 
 from pathlib import Path
 

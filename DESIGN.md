@@ -181,7 +181,7 @@ delay = min(initial_delay * backoff^attempt, max_delay)
 Tests are split into two separate projects:
 
 - **Rust Unit Tests**: Fast, in-process tests for pure logic (retry calculations, CLI parsing, transport internals)
-- **Python E2E Tests**: Full black-box tests using the compiled binary with Docker SSH containers
+- **Python Integration Tests**: Black-box tests using the compiled binary with Docker SSH containers
 
 This separation:
 - Keeps Rust code clean (no testcontainers dependency)
@@ -200,14 +200,13 @@ src/
 ├── main.rs                  # CLI and main application logic
 └── lib.rs                   # Library entry point
 
-# Python E2E Project (separate uv-managed project)
-tests-e2e/
+# Python Integration Tests (separate uv-managed project)
+tests/
 ├── pyproject.toml           # uv project configuration
 ├── ssh_server.py            # Docker container wrapper
 ├── socks5_client.py         # SOCKS5 test client
 ├── tests/
-│   ├── test_socks5.py       # SOCKS5 proxy tests
-│   └── test_transport.py    # Transport/connection tests
+│   └── test_socks5.py       # SOCKS5 proxy tests
 ├── conftest.py              # pytest fixtures
 └── fixtures/                # Test fixtures
     ├── Dockerfile           # SSH server image with echo server
@@ -226,7 +225,7 @@ scripts/
 cargo test
 ```
 
-**E2E Tests (Python):**
+**Integration Tests (Python):**
 ```bash
 # One-time setup
 ./scripts/build-test-image.sh
@@ -244,13 +243,13 @@ uv run ty check           # Type check with ty (Rust-based, fast)
 
 ### UV Workspace
 
-The project uses a **uv workspace** (similar to Cargo workspaces) to manage the Python E2E tests:
+The project uses a **uv workspace** (similar to Cargo workspaces) to manage the Python integration tests:
 
 ```
 x2ssh/
 ├── pyproject.toml          # Workspace root configuration
 ├── uv.lock                 # Shared lockfile for entire workspace
-└── tests-e2e/
+└── tests/
     ├── pyproject.toml      # Package configuration (member of workspace)
     └── src/x2ssh_e2e/      # Package source
 ```
@@ -258,7 +257,7 @@ x2ssh/
 **Key workspace features:**
 - Single lockfile (`uv.lock` at root) ensures consistent dependencies
 - Run commands from repo root with `uv run <command>`
-- No need to `cd` into tests-e2e directory
+- No need to `cd` into tests directory
 - Works like `cargo` - workspace-aware commands from anywhere in the repo
 
 ### Docker Fixture
@@ -270,7 +269,7 @@ x2ssh/
 
 ### SSH Keys Generation
 
-To regenerate the test SSH keys in `tests-e2e/fixtures/keys/`:
+To regenerate the test SSH keys in `tests/fixtures/keys/`:
 
 ```bash
 ./scripts/generate-test-keys.sh

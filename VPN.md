@@ -446,8 +446,8 @@ x2ssh/
 │   │       ├── retry.rs          # Retry policy
 │   │       └── vpn.rs            # VPN module (declares submodules)
 │   │       └── vpn/
-│   │           ├── tun.rs        # Client TUN (Linux/Windows)
-│   │           ├── routing.rs    # Client routing (Linux/Windows)
+│   │           ├── tun.rs        # Client TUN (Linux impl, Windows stubs)
+│   │           ├── routing.rs    # Client routing (Linux impl, Windows stubs)
 │   │           ├── framing.rs    # Length-prefixed framing
 │   │           ├── session.rs    # VPN session management
 │   │           ├── hooks.rs      # PostUp/PreDown execution
@@ -458,9 +458,14 @@ x2ssh/
 │       └── src/
 │           └── main.rs           # Simple TUN bridge (~100 lines)
 │
-├── tests-e2e/
-│   └── tests/
-│       └── test_vpn.py           # VPN E2E tests
+├── tests/
+│   ├── vpn_client.py             # VPN client wrapper
+│   ├── tests/
+│   │   └── test_vpn.py           # VPN integration tests
+│   └── fixtures/
+│       ├── Dockerfile.vpn-client        # Client container
+│       ├── Dockerfile.vpn-server-target # Server + echo services
+│       └── vpn-test-config.toml         # Test VPN config
 ```
 
 ## Implementation Phases
@@ -489,12 +494,14 @@ x2ssh/
 
 **Tasks:**
 - [ ] Add `tun-rs` dependency
-- [ ] Implement Linux TUN creation
+- [ ] Implement Linux TUN creation (src/vpn/tun.rs)
+- [ ] Add stub for Windows: `todo!("Windows TUN not yet implemented")`
 - [ ] Add `rtnetlink` dependency
-- [ ] Implement Linux routing configuration (default route + exclusions)
+- [ ] Implement Linux routing configuration (src/vpn/routing.rs)
+- [ ] Add stub for Windows: `todo!("Windows routing not yet implemented")`
 - [ ] CLI integration (`--vpn` flag)
 - [ ] Root privilege checking
-- [ ] E2E test: TUN creation + routing
+- [ ] Integration test fixtures: Dockerfile.vpn-client, Dockerfile.vpn-server-target
 
 **Deliverables:** Client TUN + routing working on Linux
 
@@ -512,7 +519,8 @@ x2ssh/
 - [ ] Implement agent deployment + startup
 - [ ] Implement packet forwarding (TUN ↔ Agent ↔ Server TUN)
 - [ ] Implement cleanup on disconnect
-- [ ] E2E tests: HTTP (TCP), DNS (UDP), ping (ICMP)
+- [ ] Integration tests: TCP echo, UDP echo, ping (see Testing Strategy)
+- [ ] Integration tests: PostUp/PreDown hooks, cleanup verification
 
 **Deliverables:** Full working VPN on Linux
 
@@ -523,12 +531,13 @@ x2ssh/
 **Goal:** Windows client support
 
 **Tasks:**
+- [ ] Replace `todo!()` stubs with real implementations
 - [ ] Add Wintun driver dependency
-- [ ] Implement Windows TUN creation
-- [ ] Implement Windows routing (via `windows-sys`)
+- [ ] Implement Windows TUN creation (src/vpn/tun.rs)
+- [ ] Implement Windows routing (src/vpn/routing.rs via `windows-sys`)
 - [ ] Administrator privilege checking
 - [ ] Wintun driver installation check (fail with clear message)
-- [ ] E2E tests on Windows
+- [ ] Manual testing on Windows (automated tests deferred)
 
 **Deliverables:** VPN working on Windows client
 
@@ -656,32 +665,163 @@ opt-level = "z"  # Optimize for size
 
 ## Testing Strategy
 
-### Unit Tests
+### Unit Tests (Rust)
 
 - [ ] Config file parsing
 - [ ] Variable substitution
 - [ ] Hook command building
 - [ ] Framing/deframing
 
-### E2E Tests
+### Integration Tests (Python)
 
-- [ ] VPN connection establishment
-- [ ] TCP traffic (HTTP request)
-- [ ] UDP traffic (DNS query)
-- [ ] ICMP traffic (ping)
-- [ ] PostUp hook failure aborts startup
-- [ ] PreDown hooks run on disconnect
-- [ ] Route exclusions work
-- [ ] Manual cleanup command
+**Test Architecture:**
+
+All tests run inside Docker containers (no root required on host):
+
+```
+Docker Network: x2ssh-test-net (10.10.0.0/24)
+
+┌─────────────────────────┐        ┌──────────────────────────────────┐
+│  Container: client      │  SSH   │  Container: server-target        │
+│  IP: 10.10.0.10         │◄──────►│  IP: 10.10.0.20                  │
+│  (privileged)           │        │  (privileged)                    │
+│                         │        │                                  │
+│  - x2ssh --vpn          │        │  - sshd + x2ssh-vpn agent        │
+│  - TUN: 10.8.0.2/24     │        │  - TUN: 10.8.0.1/24              │
+│  - Test tools           │        │  - iptables MASQUERADE           │
+│                         │        │  - TCP echo (socat port 8080)    │
+│                         │        │  - UDP echo (socat port 8081)    │
+└─────────────────────────┘        │  - ping responder                │
+                                   └──────────────────────────────────┘
+```
+
+**Test Files:**
+```
+tests/
+├── conftest.py                      # Add VPN fixtures
+├── vpn_client.py                    # VPN client wrapper (NEW)
+├── tests/
+│   └── test_vpn.py                  # VPN integration tests (NEW)
+└── fixtures/
+    ├── Dockerfile.vpn-client        # Client container (NEW)
+    ├── Dockerfile.vpn-server-target # Server + echo services (NEW)
+    └── vpn-test-config.toml         # Test VPN config (NEW)
+```
+
+**Test Scenarios (tests/tests/test_vpn.py):**
+
+```python
+# Basic connectivity
+def test_vpn_tunnel_establishment(vpn_session):
+    """Verify VPN tunnel is established."""
+    # Check TUN interfaces exist (client + server)
+    # Check routing table on client
+
+def test_vpn_tcp_echo(vpn_session):
+    """Test TCP traffic through VPN tunnel."""
+    # From client: echo "test" | nc 10.10.0.20 8080
+    # Verify echo response
+
+def test_vpn_udp_echo(vpn_session):
+    """Test UDP traffic through VPN tunnel."""
+    # From client: echo "test" | nc -u 10.10.0.20 8081
+    # Verify echo response
+
+def test_vpn_ping(vpn_session):
+    """Test ICMP traffic through VPN tunnel."""
+    # From client: ping -c 4 10.10.0.20
+    # Verify 0% packet loss
+
+# Hooks & cleanup
+def test_vpn_post_up_hooks_executed(vpn_session):
+    """Verify PostUp hooks create TUN and iptables rules."""
+    # Check TUN device exists on server
+    # Check iptables rules present
+
+def test_vpn_post_up_failure_aborts():
+    """Test that failed PostUp prevents startup."""
+    # Configure invalid PostUp command
+    # Attempt VPN connection
+    # Verify failure
+
+def test_vpn_cleanup_on_disconnect(vpn_session):
+    """Test PreDown hooks execute on disconnect."""
+    # Start VPN, stop VPN (simulate Ctrl+C)
+    # Verify TUN deleted, iptables cleaned
+
+# Routing (basic verification)
+def test_vpn_default_route_via_tun(vpn_session):
+    """Verify default route points to TUN interface."""
+    # Check routing table on client
+    # Verify default via tun-x2ssh
+
+def test_vpn_ssh_excluded_from_tunnel(vpn_session):
+    """Verify SSH connection excluded from VPN routing."""
+    # Check specific route for 10.10.0.20 bypasses TUN
+```
+
+**Helper Modules:**
+
+`vpn_client.py` - VPN session management:
+```python
+class VpnClient:
+    """Manages VPN client container and x2ssh process."""
+    
+    def start_vpn(self, server_ip: str, config_path: Path) -> None:
+        """Start x2ssh --vpn inside client container."""
+    
+    def exec(self, cmd: str) -> tuple[int, str, str]:
+        """Execute command inside client container."""
+    
+    def get_routing_table(self) -> list[str]:
+        """Get routing table from client."""
+    
+    def stop_vpn(self) -> None:
+        """Stop VPN and verify cleanup."""
+```
+
+**Pytest Fixtures (additions to conftest.py):**
+
+```python
+@pytest.fixture(scope="session")
+def vpn_docker_network():
+    """Create Docker network for VPN tests."""
+    # Create network: x2ssh-test-net (10.10.0.0/24)
+
+@pytest.fixture(scope="session")
+def vpn_containers(vpn_docker_network):
+    """Start VPN test containers."""
+    # Start server-target container (10.10.0.20)
+    # Start client container (10.10.0.10)
+    # Build and copy x2ssh + x2ssh-vpn binaries
+
+@pytest.fixture
+def vpn_session(vpn_containers):
+    """Provide a running VPN session."""
+    # Start x2ssh --vpn in client container
+    # Yield VpnClient instance
+    # Cleanup: stop VPN
+```
+
+**Run tests:**
+```bash
+# All tests (SOCKS5 + VPN)
+uv run pytest
+
+# VPN tests only
+uv run pytest tests/tests/test_vpn.py
+```
 
 ### Manual Tests
 
-- [ ] Linux client → Linux server
+- [ ] Linux client → Linux server (real network)
 - [ ] Windows client → Linux server
-- [ ] DNS leak test
-- [ ] IP leak test
+- [ ] DNS leak test (dnsleaktest.com)
+- [ ] IP leak test (ipleak.net)
 - [ ] Routing cleanup on Ctrl+C
 - [ ] Multiple concurrent connections
+- [ ] Large data transfer (sustained throughput)
+- [ ] Manual cleanup command (`x2ssh cleanup`)
 
 ## References
 
