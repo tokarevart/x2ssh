@@ -221,7 +221,7 @@ Examples:
 2. Runs PostUp commands (hardcoded in MVP, variables in Phase 6)
    - PostUp creates TUN, sets up iptables
    - If ANY PostUp command fails, abort startup
-3. Deploys agent binary (base64 over SSH)
+3. Deploys agent binary (raw bytes via SSH exec: `cat > /tmp/x2ssh-agent`)
 4. Starts agent via SSH exec
 5. VPN forwarding begins
 ...
@@ -483,7 +483,7 @@ x2ssh/
 - [ ] Implement TOML config parsing (with CLI override)
 - [ ] Implement simple TUN bridge agent
 - [ ] Build script for musl static linking
-- [ ] Agent deployment logic (base64 upload)
+- [ ] Agent deployment logic (raw bytes via `cat > /tmp/x2ssh-agent` over SSH exec stdin)
 - [ ] Unit tests for config parsing
 
 **Deliverables:** Config file working, agent compiles and can be deployed
@@ -599,7 +599,6 @@ toml = "0.8"
 
 # VPN
 tun-rs = { version = "2.8", features = ["async"] }
-base64 = "0.22"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rtnetlink = "0.20"
