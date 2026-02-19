@@ -75,7 +75,7 @@ The E2E tests use `cargo run` to test the actual binary, providing true black-bo
 
 ### Full Project Check
 
-Run all checks (Rust unit tests, Python E2E tests, formatting, linting, type checking):
+Run all checks (Rust build, unit tests, Python E2E tests, formatting, linting, type checking):
 
 ```bash
 ./scripts/check.sh           # Run all checks

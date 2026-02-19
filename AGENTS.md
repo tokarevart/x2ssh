@@ -12,7 +12,14 @@
 
 ### Build & Run
 
+**Note:** The `x2ssh-agent` binary is automatically built with musl for fully static binaries (portable to any Linux server). The main `x2ssh` binary builds with the host target for cross-platform support (Linux/Windows).
+
 ```bash
+# Install musl target (one-time setup for agent)
+rustup target add x86_64-unknown-linux-musl
+# Install musl-tools (Ubuntu/Debian)
+sudo apt-get install musl-tools
+
 cargo build
 cargo run -- -D 127.0.0.1:1080 user@server.com
 ```
@@ -32,7 +39,7 @@ uv run ty check                       # Type check with ty (Rust-based, fast)
 ### Full Project Check
 
 ```bash
-./scripts/check.sh                # Run all checks (Rust + Python)
+./scripts/check.sh                # Run all checks (build, Rust + Python tests, lint, format)
 ./scripts/check.sh -v             # Verbose mode with full output
 ```
 

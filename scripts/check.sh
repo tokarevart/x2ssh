@@ -63,6 +63,11 @@ run_check() {
 echo "=== Rust Checks ==="
 echo ""
 
+# First, ensure everything compiles (this also triggers build.rs for agent)
+if ! run_check "Rust build" "cargo build" ""; then
+    FAILED=1
+fi
+
 # Rust formatting
 if ! run_check "Rust formatting" "cargo fmt -- --check" "cargo fmt"; then
     FAILED=1

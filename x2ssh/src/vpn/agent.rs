@@ -1,7 +1,7 @@
 use crate::transport::Transport;
 
 /// Embedded x2ssh-agent binary (compiled via build.rs)
-pub const AGENT_BINARY: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/x2ssh-agent"));
+pub const AGENT_BINARY: &[u8] = include_bytes!(env!("X2SSH_AGENT_PATH"));
 
 /// Deploy the agent binary to the remote host and start it
 ///
