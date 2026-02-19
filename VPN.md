@@ -444,8 +444,8 @@ x2ssh/
 │   │       ├── socks.rs          # SOCKS5 mode
 │   │       ├── transport.rs      # SSH transport
 │   │       ├── retry.rs          # Retry policy
-│   │       └── vpn/              # VPN module
-│   │           ├── mod.rs
+│   │       └── vpn.rs            # VPN module (declares submodules)
+│   │       └── vpn/
 │   │           ├── tun.rs        # Client TUN (Linux/Windows)
 │   │           ├── routing.rs    # Client routing (Linux/Windows)
 │   │           ├── framing.rs    # Length-prefixed framing

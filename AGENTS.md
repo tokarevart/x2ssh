@@ -58,6 +58,7 @@ uv run ty check                 # Type check
 3. **Keep fixtures in `tests-e2e/fixtures/`** - SSH keys, Dockerfile
 4. **Run `./scripts/build-test-image.sh` before first E2E test**
 5. **After making changes, run `./scripts/check.sh`** - Verifies all quality checks pass
+6. **Module structure: Use `module.rs` instead of `module/mod.rs`** - For cleaner file organization
 
 ## Project Structure
 
