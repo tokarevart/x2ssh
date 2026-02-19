@@ -48,20 +48,20 @@ mtu = 1400
 exclude = ["192.168.0.0/16", "172.16.0.0/12"]
 
 # PostUp: Commands run on server AFTER TUN is ready (but before agent starts)
-# Available variables: {TUN}, {SUBNET}, {SERVER_IP}, {CLIENT_IP}, {INTERFACE}
+# MVP: Use hardcoded values (variable substitution in Phase 6)
 post_up = [
-    "ip tuntap add mode tun name {TUN}",
-    "ip addr add {SERVER_IP}/24 dev {TUN}",
-    "ip link set {TUN} up",
+    "ip tuntap add mode tun name x2ssh0",
+    "ip addr add 10.8.0.1/24 dev x2ssh0",
+    "ip link set x2ssh0 up",
     "sysctl -w net.ipv4.ip_forward=1",
-    "iptables -t nat -I POSTROUTING -o {INTERFACE} -j MASQUERADE",
+    "iptables -t nat -I POSTROUTING -o eth0 -j MASQUERADE",
 ]
 
 # PreDown: Commands run on server BEFORE TUN is destroyed (after agent stops)
 # Executed one-by-one even if some fail
 pre_down = [
-    "iptables -t nat -D POSTROUTING -o {INTERFACE} -j MASQUERADE",
-    "ip link delete {TUN}",
+    "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE",
+    "ip link delete x2ssh0",
 ]
 
 [connection]
@@ -77,9 +77,11 @@ max_delay_ms = 30000
 health_interval_ms = 5000
 ```
 
-### Variable Substitution
+### Variable Substitution (Phase 6 - Future)
 
-Available variables in `post_up` and `pre_down` commands:
+**Note:** MVP (Phases 1-5) uses hardcoded values in PostUp/PreDown commands. Variable substitution will be added in Phase 6.
+
+Available variables in `post_up` and `pre_down` commands (Phase 6):
 
 | Variable | Description | Example Value |
 |----------|-------------|---------------|
@@ -89,7 +91,7 @@ Available variables in `post_up` and `pre_down` commands:
 | `{CLIENT_IP}` | Client TUN IP address | `10.8.0.2` |
 | `{INTERFACE}` | Server outbound interface | `eth0` (auto-detected or from config) |
 
-**Auto-detection:**
+**Auto-detection (Phase 6):**
 - `{INTERFACE}` is auto-detected via `ip route get 8.8.8.8` if not specified
 - Can override with `server_interface = "eth0"` in config
 
@@ -216,40 +218,41 @@ Examples:
 
 ```
 1. x2ssh connects via SSH
-2. Detects server outbound interface (ip route get 8.8.8.8)
-3. Runs PostUp commands with variable substitution
+2. Runs PostUp commands (hardcoded in MVP, variables in Phase 6)
    - PostUp creates TUN, sets up iptables
    - If ANY PostUp command fails, abort startup
-4. Deploys agent binary (base64 over SSH)
-5. Starts agent via SSH exec
-6. VPN forwarding begins
+3. Deploys agent binary (base64 over SSH)
+4. Starts agent via SSH exec
+5. VPN forwarding begins
 ...
 (On disconnect or error)
-7. Stops agent
-8. Runs PreDown commands (one-by-one, errors ignored)
-9. Cleanup complete
+6. Stops agent
+7. Runs PreDown commands (one-by-one, errors ignored)
+8. Cleanup complete
 ```
 
-**Example PostUp (iptables):**
+**Example PostUp (iptables) - MVP:**
 
 ```toml
+# MVP: Hardcoded values (adjust eth0 to match your server's interface)
 post_up = [
-    "ip tuntap add mode tun name {TUN}",
-    "ip addr add {SERVER_IP}/24 dev {TUN}",
-    "ip link set {TUN} up",
+    "ip tuntap add mode tun name x2ssh0",
+    "ip addr add 10.8.0.1/24 dev x2ssh0",
+    "ip link set x2ssh0 up",
     "sysctl -w net.ipv4.ip_forward=1",
-    "iptables -t nat -I POSTROUTING -o {INTERFACE} -j MASQUERADE",
+    "iptables -t nat -I POSTROUTING -o eth0 -j MASQUERADE",
 ]
 
 pre_down = [
-    "iptables -t nat -D POSTROUTING -o {INTERFACE} -j MASQUERADE",
-    "ip link delete {TUN}",
+    "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE",
+    "ip link delete x2ssh0",
 ]
 ```
 
-**Example PostUp (nftables):**
+**Example PostUp (nftables) - Phase 6 with variables:**
 
 ```toml
+# Phase 6: With variable substitution
 post_up = [
     "ip tuntap add mode tun name {TUN}",
     "ip addr add {SERVER_IP}/24 dev {TUN}",
@@ -266,9 +269,10 @@ pre_down = [
 ]
 ```
 
-**Example PostUp (with ufw):**
+**Example PostUp (with ufw) - Phase 6 with variables:**
 
 ```toml
+# Phase 6: With variable substitution
 post_up = [
     "ip tuntap add mode tun name {TUN}",
     "ip addr add {SERVER_IP}/24 dev {TUN}",
@@ -470,21 +474,23 @@ x2ssh/
 
 ## Implementation Phases
 
-### Phase 1: Foundation & Agent
+### Phase 1: Foundation & Agent (MVP)
 
-**Goal:** Server-side agent + config parsing
+**Goal:** Server-side agent + basic config parsing
 
 **Tasks:**
 - [ ] Create workspace structure
 - [ ] Add `directories` crate for config path
 - [ ] Implement TOML config parsing (with CLI override)
-- [ ] Implement variable substitution for hooks
 - [ ] Implement simple TUN bridge agent
 - [ ] Build script for musl static linking
 - [ ] Agent deployment logic (base64 upload)
-- [ ] Unit tests for config parsing and variable substitution
+- [ ] Unit tests for config parsing
 
 **Deliverables:** Config file working, agent compiles and can be deployed
+
+**Deferred to Phase 6:**
+- Variable substitution for hooks (use hardcoded values for MVP)
 
 ---
 
@@ -507,22 +513,25 @@ x2ssh/
 
 ---
 
-### Phase 3: Integration & Server Hooks
+### Phase 3: Integration & Server Hooks (MVP)
 
 **Goal:** Complete VPN flow with PostUp/PreDown
 
 **Tasks:**
-- [ ] Implement SSH command execution for hooks
+- [ ] Implement SSH command execution for hooks (simple string execution)
 - [ ] Implement PostUp execution (abort on failure)
 - [ ] Implement PreDown execution (ignore failures)
-- [ ] Auto-detect server outbound interface
 - [ ] Implement agent deployment + startup
 - [ ] Implement packet forwarding (TUN ↔ Agent ↔ Server TUN)
 - [ ] Implement cleanup on disconnect
 - [ ] Integration tests: TCP echo, UDP echo, ping (see Testing Strategy)
 - [ ] Integration tests: PostUp/PreDown hooks, cleanup verification
 
-**Deliverables:** Full working VPN on Linux
+**Deliverables:** Full working VPN on Linux (MVP - no variable substitution)
+
+**Deferred to Phase 6:**
+- Auto-detect server outbound interface
+- Variable substitution in hooks
 
 ---
 
@@ -553,6 +562,20 @@ x2ssh/
 - [ ] Logging and diagnostics
 - [ ] Performance optimization (minimize copies)
 - [ ] Documentation updates (README.md, examples/)
+
+---
+
+### Phase 6: Variable Substitution & Advanced Features
+
+**Goal:** Flexible hook configuration
+
+**Tasks:**
+- [ ] Implement variable substitution for PostUp/PreDown hooks
+- [ ] Auto-detect server outbound interface (`ip route get 8.8.8.8`)
+- [ ] Support `{TUN}`, `{SUBNET}`, `{SERVER_IP}`, `{CLIENT_IP}`, `{INTERFACE}`
+- [ ] Update config examples to use variables
+- [ ] Unit tests for variable substitution
+- [ ] Integration tests for different hook configurations
 - [ ] Security audit
 
 **Deliverables:** Production-ready VPN
@@ -667,10 +690,13 @@ opt-level = "z"  # Optimize for size
 
 ### Unit Tests (Rust)
 
+**MVP (Phase 1-5):**
 - [ ] Config file parsing
-- [ ] Variable substitution
-- [ ] Hook command building
+- [ ] Hook command building (no substitution)
 - [ ] Framing/deframing
+
+**Later (Phase 6):**
+- [ ] Variable substitution
 
 ### Integration Tests (Python)
 
@@ -683,7 +709,7 @@ Docker Network: x2ssh-test-net (10.10.0.0/24)
 
 ┌─────────────────────────┐        ┌──────────────────────────────────┐
 │  Container: client      │  SSH   │  Container: server-target        │
-│  IP: 10.10.0.10         │◄──────►│  IP: 10.10.0.20                  │
+│  IP: 10.10.0.10         │◄─────►│  IP: 10.10.0.20                  │
 │  (privileged)           │        │  (privileged)                    │
 │                         │        │                                  │
 │  - x2ssh --vpn          │        │  - sshd + x2ssh-vpn agent        │
