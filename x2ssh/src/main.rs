@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use x2ssh::retry::RetryPolicy;
 use x2ssh::socks;
 use x2ssh::transport::Transport;
 use x2ssh::transport::TransportConfig;
+use x2ssh::vpn;
 
 fn parse_user_host(s: &str) -> Result<(String, String), String> {
     let parts: Vec<&str> = s.splitn(2, '@').collect();
@@ -38,9 +40,13 @@ struct Cli {
     #[arg(long = "config", value_name = "FILE")]
     config: Option<PathBuf>,
 
-    /// VPN subnet CIDR (e.g., 10.8.0.0/24)
-    #[arg(long = "vpn-subnet", value_name = "CIDR")]
-    vpn_subnet: Option<String>,
+    /// VPN client address with prefix (e.g., 10.8.0.2/24)
+    #[arg(long = "vpn-client-address", value_name = "ADDR/PREFIX")]
+    vpn_client_address: Option<String>,
+
+    /// VPN server address with prefix (e.g., 10.8.0.1/24)
+    #[arg(long = "vpn-server-address", value_name = "ADDR/PREFIX")]
+    vpn_server_address: Option<String>,
 
     /// Client TUN interface name (e.g., tun-x2ssh)
     #[arg(long = "vpn-client-tun", value_name = "NAME")]
@@ -141,8 +147,11 @@ impl Cli {
         }
 
         // Apply CLI overrides
-        if let Some(subnet) = &self.vpn_subnet {
-            config.subnet = subnet.clone();
+        if let Some(client_address) = &self.vpn_client_address {
+            config.client_address = client_address.clone();
+        }
+        if let Some(server_address) = &self.vpn_server_address {
+            config.server_address = server_address.clone();
         }
         if let Some(client_tun) = &self.vpn_client_tun {
             config.client_tun = client_tun.clone();
@@ -177,7 +186,7 @@ async fn main() -> anyhow::Result<()> {
     let _vpn_config = if cli.vpn {
         let config = cli.vpn_config()?;
         info!("VPN mode enabled");
-        info!("VPN subnet: {}", config.subnet);
+        info!("VPN client address: {}", config.client_address);
         info!("Client TUN: {}", config.client_tun);
         Some(config)
     } else {
@@ -235,10 +244,15 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     } else {
-        // VPN mode (placeholder - full implementation in Phase 3)
-        return Err(anyhow::anyhow!(
-            "VPN mode is not yet fully implemented. Use --socks for SOCKS5 proxy mode."
-        ));
+        let vpn_config = cli.vpn_config()?;
+        let transport_config = cli
+            .transport_config()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let ssh_server_ip = resolve_host(&transport_config.host).await?;
+
+        vpn::run_vpn(&vpn_config, ssh_server_ip).await?;
+        Ok(())
     }
 }
 
@@ -264,6 +278,19 @@ async fn health_monitor(
             }
         }
     }
+}
+
+async fn resolve_host(host: &str) -> anyhow::Result<IpAddr> {
+    use tokio::net::lookup_host;
+
+    let addr = format!("{}:22", host);
+    let addrs: Vec<_> = lookup_host(&addr).await?.collect();
+
+    addrs
+        .into_iter()
+        .next()
+        .map(|a| a.ip())
+        .ok_or_else(|| anyhow::anyhow!("Failed to resolve host: {}", host))
 }
 
 #[cfg(test)]
@@ -292,8 +319,10 @@ mod tests {
         let cli = Cli::try_parse_from([
             "x2ssh",
             "--vpn",
-            "--vpn-subnet",
-            "10.9.0.0/24",
+            "--vpn-client-address",
+            "10.9.0.2/24",
+            "--vpn-server-address",
+            "10.9.0.1/24",
             "--vpn-mtu",
             "1280",
             "--vpn-exclude",
@@ -305,7 +334,8 @@ mod tests {
         .unwrap();
 
         assert!(cli.vpn);
-        assert_eq!(cli.vpn_subnet, Some("10.9.0.0/24".to_string()));
+        assert_eq!(cli.vpn_client_address, Some("10.9.0.2/24".to_string()));
+        assert_eq!(cli.vpn_server_address, Some("10.9.0.1/24".to_string()));
         assert_eq!(cli.vpn_mtu, Some(1280));
         assert_eq!(cli.vpn_exclude, vec![
             "192.168.0.0/16".to_string(),

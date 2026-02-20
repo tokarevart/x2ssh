@@ -49,8 +49,11 @@ When implemented (Phase 6), config will be loaded from:
 # ~/.config/x2ssh/config.toml
 
 [vpn]
-# VPN subnet (client will use .2, server will use .1)
-subnet = "10.8.0.0/24"
+# VPN client address with prefix (client IP + subnet)
+client_address = "10.8.0.2/24"
+
+# VPN server address with prefix (server IP + subnet)
+server_address = "10.8.0.1/24"
 
 # Client-side TUN interface name
 client_tun = "tun-x2ssh"
@@ -97,9 +100,11 @@ Available variables in `post_up` and `pre_down` commands (Phase 6):
 
 | Variable | Description | Example Value |
 |----------|-------------|---------------|
-| `{SUBNET}` | VPN subnet CIDR | `10.8.0.0/24` |
-| `{SERVER_IP}` | Server TUN IP address | `10.8.0.1` |
+| `{CLIENT_ADDRESS}` | Client address with prefix | `10.8.0.2/24` |
 | `{CLIENT_IP}` | Client TUN IP address | `10.8.0.2` |
+| `{SERVER_ADDRESS}` | Server address with prefix | `10.8.0.1/24` |
+| `{SERVER_IP}` | Server TUN IP address | `10.8.0.1` |
+| `{SUBNET}` | VPN subnet CIDR (derived from client_address) | `10.8.0.0/24` |
 | `{INTERFACE}` | Server outbound interface | `eth0` (auto-detected or from config) |
 
 **Auto-detection (Phase 6):**
@@ -116,7 +121,8 @@ VPN Options:
       --vpn                        Enable VPN mode (requires root/sudo on client)
       
   # Override config file settings:
-      --vpn-subnet <CIDR>          VPN subnet [config: vpn.subnet]
+      --vpn-client-address <ADDR>  Client IP with prefix, e.g. 10.8.0.2/24 [config: vpn.client_address]
+      --vpn-server-address <ADDR>  Server IP with prefix, e.g. 10.8.0.1/24 [config: vpn.server_address]
       --vpn-client-tun <NAME>      Client TUN name [config: vpn.client_tun]
       --vpn-mtu <BYTES>            TUN MTU [config: vpn.mtu]
       --vpn-exclude <CIDR>         Exclude CIDR (can repeat) [config: vpn.exclude]
@@ -134,8 +140,8 @@ Examples:
   # Use config file defaults
   sudo x2ssh --vpn user@server.com
 
-  # Override subnet and exclusions
-  sudo x2ssh --vpn --vpn-subnet 10.9.0.0/24 --vpn-exclude 192.168.1.0/24 user@server.com
+  # Override client and server addresses
+  sudo x2ssh --vpn --vpn-client-address 10.9.0.2/24 --vpn-server-address 10.9.0.1/24 user@server.com
 
   # Use custom config
   sudo x2ssh --vpn --config /etc/x2ssh/work-vpn.toml user@server.com
@@ -463,25 +469,15 @@ x2ssh/
 │       ├── retry.rs              # Retry policy
 │       └── vpn.rs                # VPN module (declares submodules)
 │       └── vpn/
+│           ├── agent.rs          # Agent deployment
 │           ├── tun.rs            # Client TUN (Linux impl, Windows stubs)
 │           ├── routing.rs        # Client routing (Linux impl, Windows stubs)
-│           ├── session.rs        # VPN session management
-│           ├── hooks.rs          # PostUp/PreDown execution
-│           └── agent.rs          # Agent deployment
+│           └── session.rs        # VPN session management + explicit cleanup
 │
 └── x2ssh-agent/                  # Server-side agent
     ├── Cargo.toml
     └── src/
         └── main.rs               # TUN bridge (~100 lines); creates and owns TUN
-│
-├── tests/
-│   ├── vpn_client.py             # VPN client wrapper
-│   ├── tests/
-│   │   └── test_vpn.py           # VPN integration tests
-│   └── fixtures/
-│       ├── Dockerfile.vpn-client        # Client container
-│       ├── Dockerfile.vpn-server-target # Server + echo services
-│       └── vpn-test-config.toml         # Test VPN config
 ```
 
 ## Implementation Phases
@@ -511,14 +507,14 @@ x2ssh/
 **Goal:** TUN device + routing on Linux client
 
 **Tasks:**
-- [ ] Add `tun-rs` dependency
-- [ ] Implement Linux TUN creation (src/vpn/tun.rs)
-- [ ] Add stub for Windows: `todo!("Windows TUN not yet implemented")`
-- [ ] Add `rtnetlink` dependency
-- [ ] Implement Linux routing configuration (src/vpn/routing.rs)
-- [ ] Add stub for Windows: `todo!("Windows routing not yet implemented")`
-- [ ] CLI integration (`--vpn` flag)
-- [ ] Root privilege checking
+- [x] Add `tun-rs` dependency
+- [x] Implement Linux TUN creation (src/vpn/tun.rs)
+- [x] Add stub for Windows: `todo!("Windows TUN not yet implemented")`
+- [x] Add `rtnetlink` dependency
+- [x] Implement Linux routing configuration (src/vpn/routing.rs)
+- [x] Add stub for Windows: `todo!("Windows routing not yet implemented")`
+- [x] CLI integration (`--vpn` flag)
+- [x] Root privilege checking
 - [ ] Integration test fixtures: Dockerfile.vpn-client, Dockerfile.vpn-server-target
 
 **Deliverables:** Client TUN + routing working on Linux
@@ -608,12 +604,14 @@ clap = { version = "4.5", features = ["derive"] }
 # Config
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
+ipnet = "2.11"
 
 # VPN
 tun-rs = { version = "2.8", features = ["async"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-rtnetlink = "0.20"
+libc = "0.2"
+rtnetlink = "0.17"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [

@@ -1,5 +1,7 @@
+use std::net::IpAddr;
 use std::path::Path;
 
+use ipnet::IpNet;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -22,8 +24,10 @@ impl AppConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct VpnConfig {
-    #[serde(default = "default_subnet")]
-    pub subnet: String,
+    #[serde(default = "default_client_address")]
+    pub client_address: String,
+    #[serde(default = "default_server_address")]
+    pub server_address: String,
     #[serde(default = "default_client_tun")]
     pub client_tun: String,
     #[serde(default = "default_mtu")]
@@ -36,10 +40,44 @@ pub struct VpnConfig {
     pub pre_down: Vec<String>,
 }
 
+impl VpnConfig {
+    pub fn parse_client_address(&self) -> anyhow::Result<(IpAddr, IpNet)> {
+        let net: IpNet = self.client_address.parse().map_err(|e| {
+            anyhow::anyhow!("invalid client_address '{}': {}", self.client_address, e)
+        })?;
+        let ip = net.addr();
+        Ok((ip, net))
+    }
+
+    pub fn parse_server_address(&self) -> anyhow::Result<(IpAddr, IpNet)> {
+        let net: IpNet = self.server_address.parse().map_err(|e| {
+            anyhow::anyhow!("invalid server_address '{}': {}", self.server_address, e)
+        })?;
+        let ip = net.addr();
+        Ok((ip, net))
+    }
+
+    pub fn client_ip(&self) -> anyhow::Result<IpAddr> {
+        let (ip, _net) = self.parse_client_address()?;
+        Ok(ip)
+    }
+
+    pub fn server_ip(&self) -> anyhow::Result<IpAddr> {
+        let (ip, _net) = self.parse_server_address()?;
+        Ok(ip)
+    }
+
+    pub fn network(&self) -> anyhow::Result<IpNet> {
+        let (_ip, net) = self.parse_client_address()?;
+        Ok(net)
+    }
+}
+
 impl Default for VpnConfig {
     fn default() -> Self {
         Self {
-            subnet: default_subnet(),
+            client_address: default_client_address(),
+            server_address: default_server_address(),
             client_tun: default_client_tun(),
             mtu: default_mtu(),
             exclude: Vec::new(),
@@ -49,8 +87,12 @@ impl Default for VpnConfig {
     }
 }
 
-fn default_subnet() -> String {
-    "10.8.0.0/24".to_string()
+fn default_client_address() -> String {
+    "10.8.0.2/24".to_string()
+}
+
+fn default_server_address() -> String {
+    "10.8.0.1/24".to_string()
 }
 
 fn default_client_tun() -> String {
@@ -150,6 +192,7 @@ impl<'de> Deserialize<'de> for MaxAttempts {
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+    use std::net::Ipv4Addr;
     use std::path::PathBuf;
 
     use super::*;
@@ -165,7 +208,8 @@ mod tests {
     fn test_parse_full_config() {
         let toml = r#"
 [vpn]
-subnet = "192.168.100.0/24"
+client_address = "192.168.100.2/24"
+server_address = "192.168.100.1/24"
 client_tun = "wg-x2ssh"
 mtu = 1280
 exclude = ["10.0.0.0/8"]
@@ -185,7 +229,8 @@ health_interval_ms = 3000
         let (_temp, path) = write_temp_config(toml);
         let config = AppConfig::load(&path).unwrap();
 
-        assert_eq!(config.vpn.subnet, "192.168.100.0/24");
+        assert_eq!(config.vpn.client_address, "192.168.100.2/24");
+        assert_eq!(config.vpn.server_address, "192.168.100.1/24");
         assert_eq!(config.vpn.client_tun, "wg-x2ssh");
         assert_eq!(config.vpn.mtu, 1280);
         assert_eq!(config.vpn.exclude, vec!["10.0.0.0/8"]);
@@ -205,12 +250,12 @@ health_interval_ms = 3000
     fn test_parse_partial_config_uses_defaults() {
         let toml = r#"
 [vpn]
-subnet = "10.9.0.0/24"
+client_address = "10.9.0.2/24"
 "#;
         let (_temp, path) = write_temp_config(toml);
         let config = AppConfig::load(&path).unwrap();
 
-        assert_eq!(config.vpn.subnet, "10.9.0.0/24");
+        assert_eq!(config.vpn.client_address, "10.9.0.2/24");
         assert_eq!(config.vpn.client_tun, "tun-x2ssh"); // default
         assert_eq!(config.connection.port, 22); // default
         assert!(matches!(config.retry.max_attempts, MaxAttempts::Inf)); // default
@@ -222,7 +267,7 @@ subnet = "10.9.0.0/24"
         let (_temp, path) = write_temp_config(toml);
         let config = AppConfig::load(&path).unwrap();
 
-        assert_eq!(config.vpn.subnet, "10.8.0.0/24");
+        assert_eq!(config.vpn.client_address, "10.8.0.2/24");
         assert_eq!(config.vpn.mtu, 1400);
         assert_eq!(config.connection.port, 22);
         assert!(matches!(config.retry.max_attempts, MaxAttempts::Inf));
@@ -231,7 +276,7 @@ subnet = "10.9.0.0/24"
     #[test]
     fn test_default_config() {
         let config = AppConfig::default();
-        assert_eq!(config.vpn.subnet, "10.8.0.0/24");
+        assert_eq!(config.vpn.client_address, "10.8.0.2/24");
         assert_eq!(config.vpn.mtu, 1400);
     }
 
@@ -274,5 +319,70 @@ max_attempts = "invalid""#;
     fn test_missing_file_uses_default() {
         let config = AppConfig::load(Path::new("/nonexistent/config.toml"));
         assert!(config.is_err()); // File not found should error
+    }
+
+    #[test]
+    fn test_vpn_config_parse_client_address() {
+        let config = VpnConfig {
+            client_address: "10.8.0.2/24".to_string(),
+            ..Default::default()
+        };
+
+        let (ip, net) = config.parse_client_address().unwrap();
+        assert_eq!(ip, IpAddr::V4(Ipv4Addr::new(10, 8, 0, 2)));
+        assert_eq!(net.addr(), IpAddr::V4(Ipv4Addr::new(10, 8, 0, 2)));
+        assert_eq!(net.prefix_len(), 24);
+    }
+
+    #[test]
+    fn test_vpn_config_client_ip() {
+        let config = VpnConfig {
+            client_address: "192.168.1.100/16".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.client_ip().unwrap(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100))
+        );
+    }
+
+    #[test]
+    fn test_vpn_config_server_ip() {
+        let config = VpnConfig {
+            client_address: "10.8.0.2/24".to_string(),
+            server_address: "10.8.0.1/24".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.server_ip().unwrap(),
+            IpAddr::V4(Ipv4Addr::new(10, 8, 0, 1))
+        );
+    }
+
+    #[test]
+    fn test_vpn_config_custom_server_ip() {
+        let config = VpnConfig {
+            client_address: "10.8.0.50/24".to_string(),
+            server_address: "10.8.0.254/24".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.client_ip().unwrap(),
+            IpAddr::V4(Ipv4Addr::new(10, 8, 0, 50))
+        );
+        assert_eq!(
+            config.server_ip().unwrap(),
+            IpAddr::V4(Ipv4Addr::new(10, 8, 0, 254))
+        );
+    }
+
+    #[test]
+    fn test_vpn_config_network() {
+        let config = VpnConfig {
+            client_address: "10.8.0.2/24".to_string(),
+            ..Default::default()
+        };
+        let net = config.network().unwrap();
+        assert_eq!(net.prefix_len(), 24);
     }
 }
