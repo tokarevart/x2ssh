@@ -9,6 +9,7 @@ use tokio::sync::watch;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
+use x2ssh::config::AppConfig;
 use x2ssh::retry::RetryPolicy;
 use x2ssh::socks;
 use x2ssh::transport::Transport;
@@ -24,10 +25,42 @@ fn parse_user_host(s: &str) -> Result<(String, String), String> {
 
 #[derive(Parser, Debug)]
 #[command(name = "x2ssh")]
-#[command(about = "SOCKS5 proxy over SSH with robust retry logic")]
+#[command(about = "SOCKS5 proxy and VPN tunnel over SSH")]
 struct Cli {
     #[arg(value_name = "USER@HOST")]
     destination: String,
+
+    /// Enable VPN mode (requires root/sudo for TUN and routing)
+    #[arg(long = "vpn")]
+    vpn: bool,
+
+    /// Config file path
+    #[arg(long = "config", value_name = "FILE")]
+    config: Option<PathBuf>,
+
+    /// VPN subnet CIDR (e.g., 10.8.0.0/24)
+    #[arg(long = "vpn-subnet", value_name = "CIDR")]
+    vpn_subnet: Option<String>,
+
+    /// Client TUN interface name (e.g., tun-x2ssh)
+    #[arg(long = "vpn-client-tun", value_name = "NAME")]
+    vpn_client_tun: Option<String>,
+
+    /// TUN MTU in bytes
+    #[arg(long = "vpn-mtu", value_name = "BYTES")]
+    vpn_mtu: Option<u16>,
+
+    /// CIDR to exclude from VPN (can be specified multiple times)
+    #[arg(long = "vpn-exclude", value_name = "CIDR")]
+    vpn_exclude: Vec<String>,
+
+    /// PostUp command (can be specified multiple times; overrides config)
+    #[arg(long = "vpn-post-up", value_name = "CMD")]
+    vpn_post_up: Vec<String>,
+
+    /// PreDown command (can be specified multiple times; overrides config)
+    #[arg(long = "vpn-pre-down", value_name = "CMD")]
+    vpn_pre_down: Vec<String>,
 
     #[arg(short = 'D', long = "socks", value_name = "ADDR")]
     socks_addr: Option<String>,
@@ -92,6 +125,44 @@ impl Cli {
             port: self.port,
         })
     }
+
+    /// Build VPN config by merging config file with CLI overrides.
+    /// CLI overrides take precedence over config file values.
+    fn vpn_config(&self) -> anyhow::Result<x2ssh::config::VpnConfig> {
+        // Start with defaults
+        let mut config = x2ssh::config::VpnConfig::default();
+
+        // Load config file if specified
+        if let Some(config_path) = &self.config
+            && config_path.exists()
+        {
+            let app_config = AppConfig::load(config_path)?;
+            config = app_config.vpn;
+        }
+
+        // Apply CLI overrides
+        if let Some(subnet) = &self.vpn_subnet {
+            config.subnet = subnet.clone();
+        }
+        if let Some(client_tun) = &self.vpn_client_tun {
+            config.client_tun = client_tun.clone();
+        }
+        if let Some(mtu) = self.vpn_mtu {
+            config.mtu = mtu;
+        }
+        if !self.vpn_exclude.is_empty() {
+            config.exclude = self.vpn_exclude.clone();
+        }
+        // CLI PostUp/PreDown completely override config file if specified
+        if !self.vpn_post_up.is_empty() {
+            config.post_up = self.vpn_post_up.clone();
+        }
+        if !self.vpn_pre_down.is_empty() {
+            config.pre_down = self.vpn_pre_down.clone();
+        }
+
+        Ok(config)
+    }
 }
 
 #[tokio::main]
@@ -102,47 +173,72 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    let socks_addr = cli
-        .socks_socket_addr()
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    // Load VPN config if VPN mode is enabled
+    let _vpn_config = if cli.vpn {
+        let config = cli.vpn_config()?;
+        info!("VPN mode enabled");
+        info!("VPN subnet: {}", config.subnet);
+        info!("Client TUN: {}", config.client_tun);
+        Some(config)
+    } else {
+        None
+    };
 
-    let config = cli
-        .transport_config()
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-    let health_interval = config.health_interval;
+    // SOCKS5 mode requires -D flag (for now, until VPN is fully implemented)
+    if cli.socks_addr.is_none() && !cli.vpn {
+        return Err(anyhow::anyhow!(
+            "Either --socks (-D) or --vpn must be specified"
+        ));
+    }
 
-    info!(
-        "Connecting to {}@{}:{}",
-        config.user, config.host, config.port
-    );
-    info!("SOCKS5 proxy listening on {}", socks_addr);
+    if cli.socks_addr.is_some() {
+        let socks_addr = cli
+            .socks_socket_addr()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    let transport = Arc::new(Transport::connect(config).await?);
-    info!("SSH session established");
+        let config = cli
+            .transport_config()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let health_interval = config.health_interval;
 
-    let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+        info!(
+            "Connecting to {}@{}:{}",
+            config.user, config.host, config.port
+        );
+        info!("SOCKS5 proxy listening on {}", socks_addr);
 
-    let health_transport = transport.clone();
-    tokio::spawn(async move {
-        health_monitor(health_transport, health_interval, shutdown_rx).await;
-    });
+        let transport = Arc::new(Transport::connect(config).await?);
+        info!("SSH session established");
 
-    let listener = TcpListener::bind(socks_addr).await?;
+        let (_shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    loop {
-        match listener.accept().await {
-            Ok((socket, client_addr)) => {
-                let transport = transport.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = socks::serve(transport, socket).await {
-                        error!("SOCKS5 error for {}: {:#}", client_addr, e);
-                    }
-                });
-            }
-            Err(err) => {
-                error!("accept error: {:?}", err);
+        let health_transport = transport.clone();
+        tokio::spawn(async move {
+            health_monitor(health_transport, health_interval, shutdown_rx).await;
+        });
+
+        let listener = TcpListener::bind(socks_addr).await?;
+
+        loop {
+            match listener.accept().await {
+                Ok((socket, client_addr)) => {
+                    let transport = transport.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = socks::serve(transport, socket).await {
+                            error!("SOCKS5 error for {}: {:#}", client_addr, e);
+                        }
+                    });
+                }
+                Err(err) => {
+                    error!("accept error: {:?}", err);
+                }
             }
         }
+    } else {
+        // VPN mode (placeholder - full implementation in Phase 3)
+        return Err(anyhow::anyhow!(
+            "VPN mode is not yet fully implemented. Use --socks for SOCKS5 proxy mode."
+        ));
     }
 }
 
@@ -181,6 +277,65 @@ mod tests {
         let cli = cli.unwrap();
         assert_eq!(cli.destination, "user@host.com");
         assert_eq!(cli.port, 22);
+        assert!(!cli.vpn);
+    }
+
+    #[test]
+    fn test_vpn_flag_parsing() {
+        let cli = Cli::try_parse_from(["x2ssh", "--vpn", "user@host.com"]).unwrap();
+        assert!(cli.vpn);
+        assert!(cli.socks_addr.is_none());
+    }
+
+    #[test]
+    fn test_vpn_with_overrides() {
+        let cli = Cli::try_parse_from([
+            "x2ssh",
+            "--vpn",
+            "--vpn-subnet",
+            "10.9.0.0/24",
+            "--vpn-mtu",
+            "1280",
+            "--vpn-exclude",
+            "192.168.0.0/16",
+            "--vpn-exclude",
+            "10.0.0.0/8",
+            "user@host.com",
+        ])
+        .unwrap();
+
+        assert!(cli.vpn);
+        assert_eq!(cli.vpn_subnet, Some("10.9.0.0/24".to_string()));
+        assert_eq!(cli.vpn_mtu, Some(1280));
+        assert_eq!(cli.vpn_exclude, vec![
+            "192.168.0.0/16".to_string(),
+            "10.0.0.0/8".to_string()
+        ]);
+    }
+
+    #[test]
+    fn test_vpn_post_up_pre_down() {
+        let cli = Cli::try_parse_from([
+            "x2ssh",
+            "--vpn",
+            "--vpn-post-up",
+            "sysctl -w net.ipv4.ip_forward=1",
+            "--vpn-post-up",
+            "iptables -t nat -I POSTROUTING -o eth0 -j MASQUERADE",
+            "--vpn-pre-down",
+            "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE",
+            "user@host.com",
+        ])
+        .unwrap();
+
+        assert!(cli.vpn);
+        assert_eq!(cli.vpn_post_up, vec![
+            "sysctl -w net.ipv4.ip_forward=1".to_string(),
+            "iptables -t nat -I POSTROUTING -o eth0 -j MASQUERADE".to_string(),
+        ]);
+        assert_eq!(cli.vpn_pre_down, vec![
+            "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE".to_string()
+        ]);
     }
 
     #[test]

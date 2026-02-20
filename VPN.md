@@ -8,11 +8,29 @@ VPN mode provides system-level tunnel for all TCP and UDP traffic, routing the e
 
 **Key Features:**
 - Full tunnel (default route) with configurable exclusions
-- WireGuard-style configuration with PostUp/PreDown hooks
-- User-configurable server-side setup (TUN, iptables, routing)
+- WireGuard-style configuration with PostUp hooks
+- User-configurable server-side setup (iptables, routing, forwarding)
 - Cross-platform client (Linux + Windows)
-- Linux server (requires root/sudo for TUN and iptables)
+- Linux server (requires root/sudo for iptables and IP forwarding)
 - Automatic agent deployment and lifecycle management
+
+## How It Works
+
+The agent (`x2ssh-agent`) is deployed to the server and creates its own TUN interface via `tun-rs`. When the agent process exits (on disconnect or error), the OS automatically tears down the TUN interface — no cleanup commands needed.
+
+**Lifecycle:**
+1. x2ssh connects via SSH
+2. Deploys agent binary to server (raw bytes via SSH exec: `cat > /tmp/x2ssh-agent`)
+3. Starts agent via SSH exec
+   - Agent creates TUN, assigns IP (e.g., 10.8.0.1/24), brings it up
+4. Runs PostUp commands (IP forwarding, iptables NAT)
+   - If ANY PostUp command fails, abort and kill agent
+5. VPN forwarding begins
+6. On disconnect or error:
+   - x2ssh runs PreDown commands via SSH exec (one-by-one, errors ignored)
+     - Cleans up iptables rules (while SSH connection still alive)
+   - x2ssh closes agent SSH exec channel → agent exits
+   - OS destroys TUN automatically
 
 ## Configuration
 
@@ -34,10 +52,7 @@ When implemented (Phase 6), config will be loaded from:
 # VPN subnet (client will use .2, server will use .1)
 subnet = "10.8.0.0/24"
 
-# Server-side TUN interface name
-server_tun = "x2ssh0"
-
-# Client-side TUN interface name  
+# Client-side TUN interface name
 client_tun = "tun-x2ssh"
 
 # MTU for TUN interface
@@ -46,21 +61,19 @@ mtu = 1400
 # CIDRs to exclude from VPN routing
 exclude = ["192.168.0.0/16", "172.16.0.0/12"]
 
-# PostUp: Commands run on server AFTER TUN is ready (but before agent starts)
+# PostUp: Commands run on server AFTER agent is ready
+# Used for iptables NAT and IP forwarding — NOT for TUN setup (agent handles that)
 # MVP: Use hardcoded values (variable substitution in Phase 6)
 post_up = [
-    "ip tuntap add mode tun name x2ssh0",
-    "ip addr add 10.8.0.1/24 dev x2ssh0",
-    "ip link set x2ssh0 up",
     "sysctl -w net.ipv4.ip_forward=1",
     "iptables -t nat -I POSTROUTING -o eth0 -j MASQUERADE",
 ]
 
-# PreDown: Commands run on server BEFORE TUN is destroyed (after agent stops)
+# PreDown: Commands run on server BEFORE agent stops
+# Used to clean up iptables rules — NOT for TUN deletion (OS handles that when agent exits)
 # Executed one-by-one even if some fail
 pre_down = [
     "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE",
-    "ip link delete x2ssh0",
 ]
 
 [connection]
@@ -84,7 +97,6 @@ Available variables in `post_up` and `pre_down` commands (Phase 6):
 
 | Variable | Description | Example Value |
 |----------|-------------|---------------|
-| `{TUN}` | Server TUN interface name | `x2ssh0` |
 | `{SUBNET}` | VPN subnet CIDR | `10.8.0.0/24` |
 | `{SERVER_IP}` | Server TUN IP address | `10.8.0.1` |
 | `{CLIENT_IP}` | Client TUN IP address | `10.8.0.2` |
@@ -100,16 +112,15 @@ Available variables in `post_up` and `pre_down` commands (Phase 6):
 x2ssh --vpn [OPTIONS] <USER@HOST>
 
 VPN Options:
-      --config <FILE>              Config file [default: platform-specific]
+      --config <FILE>              Config file (MVP: must specify explicitly)
       --vpn                        Enable VPN mode (requires root/sudo on client)
       
   # Override config file settings:
       --vpn-subnet <CIDR>          VPN subnet [config: vpn.subnet]
-      --vpn-server-tun <NAME>      Server TUN name [config: vpn.server_tun]
       --vpn-client-tun <NAME>      Client TUN name [config: vpn.client_tun]
       --vpn-mtu <BYTES>            TUN MTU [config: vpn.mtu]
       --vpn-exclude <CIDR>         Exclude CIDR (can repeat) [config: vpn.exclude]
-      --vpn-server-interface <IF>  Server outbound interface [auto-detect]
+      --vpn-server-interface <IF>  Server outbound interface [Phase 6]
       
   # Override PostUp/PreDown entirely (all flags in a group replace config):
       --vpn-post-up <CMD>          PostUp command (can repeat)
@@ -131,9 +142,9 @@ Examples:
   
   # Override PostUp/PreDown entirely
   sudo x2ssh --vpn \
-    --vpn-post-up "ip tuntap add mode tun name wg0" \
-    --vpn-post-up "ip link set wg0 up" \
-    --vpn-pre-down "ip link delete wg0" \
+    --vpn-post-up "sysctl -w net.ipv4.ip_forward=1" \
+    --vpn-post-up "iptables -t nat -I POSTROUTING -o eth0 -j MASQUERADE" \
+    --vpn-pre-down "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE" \
     user@server.com
 ```
 
@@ -170,25 +181,27 @@ Examples:
 │  │                          ↕                         │      │
 │  │   stdout ◀─ Frame ◀──── TUN ◀── Kernel ◀─ Net    │◀─────┼─── Internet
 │  │                                                    │      │
+│  │   Agent owns TUN lifecycle: creates on startup,   │      │
+│  │   OS destroys on agent exit (no cleanup needed)   │      │
 │  └────────────────────────────────────────────────────┘      │
 │                                                              │
-│  PostUp hooks create TUN, set up iptables NAT                │
-│  PreDown hooks tear down iptables, delete TUN                │
+│  PostUp hooks enable IP forwarding and iptables NAT          │
+│  PreDown hooks remove iptables rules before agent stops      │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Design: WireGuard-Style with Server TUN
+### Design: Agent-Owned TUN
 
-**Key insight:** Instead of using raw sockets, we create a TUN interface on the **server** too. The agent simply bridges client packets (stdin/stdout) ↔ server TUN interface.
+**Key insight:** The agent creates and owns the TUN interface. When the agent process exits (for any reason), the OS automatically destroys the TUN. This eliminates an entire class of cleanup problems.
 
 **Why this works:**
-- Server TUN interface has an IP in the VPN subnet (e.g., 10.8.0.1)
+- Agent creates TUN via `tun-rs` on startup, assigns subnet IP (e.g., 10.8.0.1)
 - Client packets arrive with source IP in VPN subnet (e.g., 10.8.0.2)
 - iptables MASQUERADE rewrites source IP when packets leave server TUN → Internet
 - Responses come back, iptables rewrites destination IP → 10.8.0.2
 - Kernel routes packets to server TUN interface
 - Agent reads from server TUN, sends to client via stdout
-- **Simple, stateless, kernel does all the work!**
+- **No manual TUN creation or deletion in PostUp/PreDown — the agent handles it all!**
 
 ## Components
 
@@ -213,38 +226,39 @@ Examples:
 
 ### 2. Server-Side Setup (User-Configurable)
 
+PostUp/PreDown hooks are for **network configuration only** — iptables, IP forwarding, firewall rules. TUN creation and deletion are handled automatically by the agent.
+
 **Lifecycle:**
 
 ```
 1. x2ssh connects via SSH
-2. Runs PostUp commands (hardcoded in MVP, variables in Phase 6)
-   - PostUp creates TUN, sets up iptables
-   - If ANY PostUp command fails, abort startup
-3. Deploys agent binary (raw bytes via SSH exec: `cat > /tmp/x2ssh-agent`)
-4. Starts agent via SSH exec
+2. Deploys agent binary (raw bytes via SSH exec: `cat > /tmp/x2ssh-agent`)
+3. Starts agent via SSH exec
+   - Agent creates TUN, assigns IP (e.g., 10.8.0.1/24), brings it up
+4. Runs PostUp commands (IP forwarding, iptables NAT)
+   - If ANY PostUp command fails, abort and kill agent
 5. VPN forwarding begins
 ...
 (On disconnect or error)
-6. Stops agent
-7. Runs PreDown commands (one-by-one, errors ignored)
-8. Cleanup complete
+6. x2ssh runs PreDown commands via SSH exec (one-by-one, errors ignored)
+    - Cleans up iptables rules (while SSH connection still alive)
+7. x2ssh closes agent SSH exec channel → agent exits
+8. OS destroys TUN automatically
+9. Cleanup complete
 ```
 
 **Example PostUp (iptables) - MVP:**
 
 ```toml
 # MVP: Hardcoded values (adjust eth0 to match your server's interface)
+# Note: No TUN commands here — the agent handles TUN creation automatically
 post_up = [
-    "ip tuntap add mode tun name x2ssh0",
-    "ip addr add 10.8.0.1/24 dev x2ssh0",
-    "ip link set x2ssh0 up",
     "sysctl -w net.ipv4.ip_forward=1",
     "iptables -t nat -I POSTROUTING -o eth0 -j MASQUERADE",
 ]
 
 pre_down = [
     "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE",
-    "ip link delete x2ssh0",
 ]
 ```
 
@@ -253,9 +267,6 @@ pre_down = [
 ```toml
 # Phase 6: With variable substitution
 post_up = [
-    "ip tuntap add mode tun name {TUN}",
-    "ip addr add {SERVER_IP}/24 dev {TUN}",
-    "ip link set {TUN} up",
     "sysctl -w net.ipv4.ip_forward=1",
     "nft add table inet x2ssh",
     "nft add chain inet x2ssh postrouting { type nat hook postrouting priority 100 \\; }",
@@ -264,7 +275,6 @@ post_up = [
 
 pre_down = [
     "nft delete table inet x2ssh",
-    "ip link delete {TUN}",
 ]
 ```
 
@@ -273,18 +283,14 @@ pre_down = [
 ```toml
 # Phase 6: With variable substitution
 post_up = [
-    "ip tuntap add mode tun name {TUN}",
-    "ip addr add {SERVER_IP}/24 dev {TUN}",
-    "ip link set {TUN} up",
     "sysctl -w net.ipv4.ip_forward=1",
-    "ufw route allow in on {TUN} out on {INTERFACE}",
+    "ufw route allow in on tun0 out on {INTERFACE}",
     "iptables -t nat -I POSTROUTING -o {INTERFACE} -j MASQUERADE",
 ]
 
 pre_down = [
     "iptables -t nat -D POSTROUTING -o {INTERFACE} -j MASQUERADE",
-    "ufw route delete allow in on {TUN} out on {INTERFACE}",
-    "ip link delete {TUN}",
+    "ufw route delete allow in on tun0 out on {INTERFACE}",
 ]
 ```
 
@@ -292,25 +298,26 @@ pre_down = [
 
 **Binary:** `x2ssh-agent` (statically compiled with musl for Linux)
 
-**Simple TUN bridge - no complex logic:**
+**Creates and owns the TUN interface — no external setup needed:**
 
 ```rust
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let tun_name = std::env::args().nth(2).expect("Usage: x2ssh-agent --tun <NAME>");
-    
-    // Create TUN device using tun-rs (proper async I/O)
-    let tun = Arc::new(
-        tun_rs::DeviceBuilder::new()
-            .name(&tun_name)
-            .build_async()?
-    );
-    
+    // Agent receives subnet IP from x2ssh (e.g., "10.8.0.1/24")
+    let subnet_ip = std::env::args().nth(2).expect("Usage: x2ssh-agent --ip <SUBNET_IP>");
+
+    // Create and configure TUN device (agent owns this — dies with the process)
+    let tun = tun_rs::DeviceBuilder::new()
+        .address_with_prefix(subnet_ip.parse()?)
+        .up()
+        .build_async()?;
+    let tun = Arc::new(tun);
+
     let tun_for_write = Arc::clone(&tun);
     let mut stdin = tokio::io::stdin();
-    
+
     // Client → Server TUN: Read framed packet from stdin, send to TUN
     let client_to_tun = tokio::spawn(async move {
         loop {
@@ -318,10 +325,10 @@ async fn main() -> anyhow::Result<()> {
             tun_for_write.send(&packet).await?;
         }
     });
-    
+
     let tun_for_read = Arc::clone(&tun);
     let mut stdout = tokio::io::stdout();
-    
+
     // Server TUN → Client: Receive from TUN, write framed to stdout
     let tun_to_client = tokio::spawn(async move {
         let mut buf = vec![0u8; 2048];
@@ -330,22 +337,20 @@ async fn main() -> anyhow::Result<()> {
             proto::write_framed(&mut stdout, &buf[..n]).await?;
         }
     });
-    
+
     tokio::select! {
         _ = client_to_tun => {},
         _ = tun_to_client => {},
     }
-    
+
     Ok(())
+    // TUN destroyed automatically when process exits
 }
 ```
 
-**That's it!** Agent is ~50 lines of code. No NAT, no packet parsing, no state tracking. Uses `tun-rs` for proper async I/O with epoll/kqueue.
-
 **Agent privileges:**
-- Needs permission to open `/dev/net/tun` and access the specific TUN device
-- Usually runs via `sudo` in SSH exec command
-- User controls this via their PostUp/PreDown scripts
+- Needs permission to create TUN (`/dev/net/tun`) — usually via `sudo` in SSH exec command
+- User controls this via their SSH/sudo configuration
 
 ### 4. Protocol
 
@@ -359,43 +364,51 @@ No serialization framework needed. Both client and agent implement the same triv
 
 ## Cleanup Strategy
 
-### Best-Effort Self-Cleanup
+### Automatic Cleanup
 
-Agent and client attempt cleanup on graceful shutdown:
+The agent-owned TUN approach means most cleanup is automatic:
+
+- **Agent exits** (normal or crash) → OS destroys TUN immediately
+- **SSH connection drops** → agent's stdin/stdout close → agent exits → TUN destroyed
+- **x2ssh killed** → SSH connection closes → agent exits → TUN destroyed
+
+**The only thing requiring explicit cleanup** is the iptables/firewall rules configured in PostUp. These are handled by PreDown commands.
+
+### Explicit Cleanup (PreDown Hooks)
+
+PreDown runs before the agent exits, cleaning up iptables rules while the SSH connection is still alive:
 
 ```rust
 // In client VPN session
 async fn run_vpn_session(config: VpnConfig) -> Result<()> {
-    // Setup
-    create_client_tun().await?;
-    setup_client_routing().await?;
+    // Deploy and start agent (agent creates TUN)
+    deploy_and_start_agent(&transport, &config).await?;
+
+    // Run PostUp (iptables/forwarding setup)
     run_post_up_hooks(&config).await?;  // Fails if any PostUp fails
-    
-    // Register cleanup via scopeguard
-    let _guard = scopeguard::guard((), |_| {
-        tokio::task::block_in_place(|| {
-            // Try to run PreDown hooks (ignore errors)
-            for cmd in &config.pre_down {
-                let _ = run_ssh_command(cmd);
-            }
-            
-            // Clean up client side
-            let _ = restore_client_routing();
-            let _ = delete_client_tun();
-        });
-    });
-    
-    // Main VPN loop
-    forward_packets().await?;
-    
-    Ok(())
+
+    let result = async {
+        // Main VPN loop
+        forward_packets().await
+    }.await;
+
+    // Run PreDown before stopping agent (SSH connection still alive)
+    for cmd in &config.pre_down {
+        let _ = run_ssh_command(cmd);
+    }
+
+    // Now stop agent
+    stop_agent().await;
+    // Agent exits → OS destroys TUN automatically
+
+    result
 }
 ```
 
 **When cleanup runs:**
 - ✅ Normal exit (Ctrl+C, user quits)
 - ✅ Error/panic in x2ssh
-- ⚠️ SIGKILL (process killed) - no cleanup possible
+- ⚠️ SIGKILL (process killed) — no cleanup possible; iptables rules remain
 
 ### Manual Cleanup Tool
 
@@ -424,6 +437,8 @@ The cleanup command:
 2. Connects via SSH
 3. Runs all PreDown commands (ignoring errors)
 4. Disconnects
+
+Note: Since TUN is automatically destroyed when the agent exits, the only thing to clean up is iptables rules.
 
 ## Project Structure
 
@@ -457,7 +472,7 @@ x2ssh/
 └── x2ssh-agent/                  # Server-side agent
     ├── Cargo.toml
     └── src/
-        └── main.rs               # Simple TUN bridge (~100 lines)
+        └── main.rs               # TUN bridge (~100 lines); creates and owns TUN
 │
 ├── tests/
 │   ├── vpn_client.py             # VPN client wrapper
@@ -479,7 +494,7 @@ x2ssh/
 - [x] Create workspace structure (`x2ssh`, `x2ssh-agent`)
 - [x] ~~Add `directories` crate for config path~~ (deferred to Phase 6, `--config` only for MVP)
 - [x] Implement TOML config parsing (with CLI override)
-- [x] Implement simple TUN bridge agent (using `tun-rs`)
+- [x] Implement simple TUN bridge agent (using `tun-rs`) — agent creates its own TUN
 - [x] Build script for agent embedding (via `build.rs`)
 - [x] Agent deployment stub (full SSH exec implementation in Phase 3)
 - [x] Unit tests for config parsing
@@ -518,7 +533,7 @@ x2ssh/
 - [ ] Implement SSH command execution for hooks (simple string execution)
 - [ ] Implement PostUp execution (abort on failure)
 - [ ] Implement PreDown execution (ignore failures)
-- [ ] Implement agent deployment + startup
+- [ ] Implement agent deployment + startup (agent creates TUN autonomously)
 - [ ] Implement packet forwarding (TUN ↔ Agent ↔ Server TUN)
 - [ ] Implement cleanup on disconnect
 - [ ] Integration tests: TCP echo, UDP echo, ping (see Testing Strategy)
@@ -569,7 +584,7 @@ x2ssh/
 **Tasks:**
 - [ ] Implement variable substitution for PostUp/PreDown hooks
 - [ ] Auto-detect server outbound interface (`ip route get 8.8.8.8`)
-- [ ] Support `{TUN}`, `{SUBNET}`, `{SERVER_IP}`, `{CLIENT_IP}`, `{INTERFACE}`
+- [ ] Support `{SUBNET}`, `{SERVER_IP}`, `{CLIENT_IP}`, `{INTERFACE}`
 - [ ] Update config examples to use variables
 - [ ] Unit tests for variable substitution
 - [ ] Integration tests for different hook configurations
@@ -629,7 +644,7 @@ opt-level = "z"  # Optimize for size
 ### Server-Side
 
 - [ ] PostUp/PreDown commands run as specified (user writes `sudo` if needed)
-- [ ] Agent runs with permissions needed to access TUN (usually via `sudo`)
+- [ ] Agent runs with permissions needed to create TUN (usually via `sudo`)
 - [ ] PreDown commands always executed (even if some fail)
 - [ ] Cleanup on crash (best-effort via scopeguard)
 
@@ -709,7 +724,7 @@ Docker Network: x2ssh-test-net (10.10.0.0/24)
 │  (privileged)           │        │  (privileged)                    │
 │                         │        │                                  │
 │  - x2ssh --vpn          │        │  - sshd + x2ssh-agent            │
-│  - TUN: 10.8.0.2/24     │        │  - TUN: 10.8.0.1/24              │
+│  - TUN: 10.8.0.2/24     │        │  - TUN: 10.8.0.1/24 (agent-owned)│
 │  - Test tools           │        │  - iptables MASQUERADE           │
 │                         │        │  - TCP echo (socat port 8080)    │
 │                         │        │  - UDP echo (socat port 8081)    │
@@ -756,8 +771,7 @@ def test_vpn_ping(vpn_session):
 
 # Hooks & cleanup
 def test_vpn_post_up_hooks_executed(vpn_session):
-    """Verify PostUp hooks create TUN and iptables rules."""
-    # Check TUN device exists on server
+    """Verify PostUp hooks set up iptables rules."""
     # Check iptables rules present
 
 def test_vpn_post_up_failure_aborts():
@@ -767,9 +781,9 @@ def test_vpn_post_up_failure_aborts():
     # Verify failure
 
 def test_vpn_cleanup_on_disconnect(vpn_session):
-    """Test PreDown hooks execute on disconnect."""
+    """Test PreDown hooks execute and TUN is gone on disconnect."""
     # Start VPN, stop VPN (simulate Ctrl+C)
-    # Verify TUN deleted, iptables cleaned
+    # Verify TUN deleted (automatic), iptables cleaned (PreDown)
 
 # Routing (basic verification)
 def test_vpn_default_route_via_tun(vpn_session):

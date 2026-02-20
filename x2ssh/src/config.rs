@@ -24,8 +24,6 @@ impl AppConfig {
 pub struct VpnConfig {
     #[serde(default = "default_subnet")]
     pub subnet: String,
-    #[serde(default = "default_server_tun")]
-    pub server_tun: String,
     #[serde(default = "default_client_tun")]
     pub client_tun: String,
     #[serde(default = "default_mtu")]
@@ -42,7 +40,6 @@ impl Default for VpnConfig {
     fn default() -> Self {
         Self {
             subnet: default_subnet(),
-            server_tun: default_server_tun(),
             client_tun: default_client_tun(),
             mtu: default_mtu(),
             exclude: Vec::new(),
@@ -54,10 +51,6 @@ impl Default for VpnConfig {
 
 fn default_subnet() -> String {
     "10.8.0.0/24".to_string()
-}
-
-fn default_server_tun() -> String {
-    "x2ssh0".to_string()
 }
 
 fn default_client_tun() -> String {
@@ -173,12 +166,11 @@ mod tests {
         let toml = r#"
 [vpn]
 subnet = "192.168.100.0/24"
-server_tun = "wg0"
 client_tun = "wg-x2ssh"
 mtu = 1280
 exclude = ["10.0.0.0/8"]
-post_up = ["ip link set $tun up"]
-pre_down = ["ip link delete $tun"]
+post_up = ["sysctl -w net.ipv4.ip_forward=1"]
+pre_down = ["iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE"]
 
 [connection]
 port = 2222
@@ -194,12 +186,13 @@ health_interval_ms = 3000
         let config = AppConfig::load(&path).unwrap();
 
         assert_eq!(config.vpn.subnet, "192.168.100.0/24");
-        assert_eq!(config.vpn.server_tun, "wg0");
         assert_eq!(config.vpn.client_tun, "wg-x2ssh");
         assert_eq!(config.vpn.mtu, 1280);
         assert_eq!(config.vpn.exclude, vec!["10.0.0.0/8"]);
-        assert_eq!(config.vpn.post_up, vec!["ip link set $tun up"]);
-        assert_eq!(config.vpn.pre_down, vec!["ip link delete $tun"]);
+        assert_eq!(config.vpn.post_up, vec!["sysctl -w net.ipv4.ip_forward=1"]);
+        assert_eq!(config.vpn.pre_down, vec![
+            "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE"
+        ]);
         assert_eq!(config.connection.port, 2222);
         assert!(matches!(config.retry.max_attempts, MaxAttempts::Count(5)));
         assert_eq!(config.retry.initial_delay_ms, 500);
@@ -218,7 +211,7 @@ subnet = "10.9.0.0/24"
         let config = AppConfig::load(&path).unwrap();
 
         assert_eq!(config.vpn.subnet, "10.9.0.0/24");
-        assert_eq!(config.vpn.server_tun, "x2ssh0"); // default
+        assert_eq!(config.vpn.client_tun, "tun-x2ssh"); // default
         assert_eq!(config.connection.port, 22); // default
         assert!(matches!(config.retry.max_attempts, MaxAttempts::Inf)); // default
     }

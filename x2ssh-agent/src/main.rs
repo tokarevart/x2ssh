@@ -3,18 +3,20 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 || args[1] != "--tun" {
-        eprintln!("Usage: x2ssh-agent --tun <NAME>");
+    if args.len() != 3 || args[1] != "--ip" {
+        eprintln!("Usage: x2ssh-agent --ip <SUBNET_IP/PREFIX>");
+        eprintln!("Example: x2ssh-agent --ip 10.8.0.1/24");
         std::process::exit(1);
     }
-    let tun_name = &args[2];
+    let subnet_ip = &args[2];
 
-    let tun = open_tun(tun_name).await?;
+    let tun = create_tun(subnet_ip).await?;
     let tun = Arc::new(tun);
 
     let tun_for_write = Arc::clone(&tun);
     let mut stdin = tokio::io::stdin();
 
+    // Client → Server TUN: Read framed packet from stdin, write to TUN
     let client_to_tun = tokio::spawn(async move {
         loop {
             match proto::read_framed(&mut stdin).await {
@@ -35,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
     let tun_for_read = Arc::clone(&tun);
     let mut stdout = tokio::io::stdout();
 
+    // Server TUN → Client: Read from TUN, write framed to stdout
     let tun_to_client = tokio::spawn(async move {
         let mut buf = vec![0u8; 2048];
         loop {
@@ -67,9 +70,21 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+    // TUN is destroyed automatically when the process exits — no cleanup needed
 }
 
-async fn open_tun(name: &str) -> anyhow::Result<tun_rs::AsyncDevice> {
-    let dev = tun_rs::DeviceBuilder::new().name(name).build_async()?;
+/// Create a TUN interface with the given subnet IP, configure it, and bring it
+/// up. The OS destroys this interface automatically when the process exits.
+async fn create_tun(subnet_ip: &str) -> anyhow::Result<tun_rs::AsyncDevice> {
+    // Parse "addr/prefix" — e.g. "10.8.0.1/24"
+    let (addr_str, prefix_str) = subnet_ip
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("expected ADDR/PREFIX, got: {subnet_ip}"))?;
+    let prefix: u8 = prefix_str.parse()?;
+
+    let dev = tun_rs::DeviceBuilder::new()
+        .ipv4(addr_str, prefix, None)
+        .mtu(1400)
+        .build_async()?;
     Ok(dev)
 }
