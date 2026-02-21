@@ -1,5 +1,7 @@
 use std::net::IpAddr;
+use std::sync::Arc;
 
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 
@@ -11,7 +13,7 @@ use crate::config::VpnConfig;
 use crate::transport::Transport;
 
 pub struct VpnSession {
-    tun: TunDevice,
+    tun: Arc<TunDevice>,
     routing: RoutingManager,
     agent: agent::AgentChannel,
     #[allow(dead_code)]
@@ -44,12 +46,78 @@ impl VpnSession {
         info!("VPN session started");
 
         Ok(Self {
-            tun,
+            tun: Arc::new(tun),
             routing,
             agent,
             ssh_server_ip,
             cleaned_up: false,
         })
+    }
+
+    pub async fn forward(&self) -> anyhow::Result<()> {
+        info!("Starting packet forwarding");
+
+        let tun = Arc::clone(&self.tun);
+        let agent = self.agent.clone();
+
+        let mut tun_to_agent = tokio::spawn(async move {
+            let mut buf = vec![0u8; 2048];
+            loop {
+                match tun.recv(&mut buf).await {
+                    Ok(n) => {
+                        debug!("TUN→Agent: {} bytes", n);
+                        if let Err(e) = agent.send_packet(&buf[..n]).await {
+                            error!("Failed to send packet to agent: {}", e);
+                            return Err(e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("TUN recv error: {}", e);
+                        return Err(e);
+                    }
+                }
+            }
+        });
+
+        let tun = Arc::clone(&self.tun);
+        let agent = self.agent.clone();
+
+        let mut agent_to_tun = tokio::spawn(async move {
+            loop {
+                match agent.recv_packet().await {
+                    Ok(Some(packet)) => {
+                        debug!("Agent→TUN: {} bytes", packet.len());
+                        if let Err(e) = tun.send(&packet).await {
+                            error!("Failed to send packet to TUN: {}", e);
+                            return Err(e);
+                        }
+                    }
+                    Ok(None) => {
+                        info!("Agent channel closed");
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        error!("Agent recv error: {}", e);
+                        return Err(e);
+                    }
+                }
+            }
+        });
+
+        let result = tokio::select! {
+            result = &mut tun_to_agent => {
+                info!("TUN→Agent task finished");
+                agent_to_tun.abort();
+                result
+            }
+            result = &mut agent_to_tun => {
+                info!("Agent→TUN task finished");
+                tun_to_agent.abort();
+                result
+            }
+        };
+
+        result?
     }
 
     pub async fn cleanup(

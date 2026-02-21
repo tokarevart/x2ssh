@@ -1,5 +1,8 @@
-use russh::Channel;
+use std::sync::Arc;
+
 use russh::ChannelMsg;
+use russh::ChannelReadHalf;
+use russh::ChannelWriteHalf;
 use russh::client::Msg;
 use tokio::sync::Mutex;
 use tracing::debug;
@@ -10,28 +13,30 @@ use crate::transport::Transport;
 pub const AGENT_BINARY: &[u8] = include_bytes!(env!("X2SSH_AGENT_PATH"));
 const AGENT_PATH: &str = "/tmp/x2ssh-agent";
 
+#[derive(Clone)]
 pub struct AgentChannel {
-    channel: Mutex<Channel<Msg>>,
+    reader: Arc<Mutex<ChannelReadHalf>>,
+    writer: Arc<Mutex<ChannelWriteHalf<Msg>>>,
 }
 
 impl AgentChannel {
     pub async fn send_packet(&self, packet: &[u8]) -> anyhow::Result<()> {
-        let channel = self.channel.lock().await;
+        let writer = self.writer.lock().await;
         let mut framed = Vec::with_capacity(4 + packet.len());
         framed.extend_from_slice(&(packet.len() as u32).to_be_bytes());
         framed.extend_from_slice(packet);
-        channel.data(&framed[..]).await?;
+        writer.data(&framed[..]).await?;
         Ok(())
     }
 
     pub async fn recv_packet(&self) -> anyhow::Result<Option<Vec<u8>>> {
-        let mut channel = self.channel.lock().await;
+        let mut reader = self.reader.lock().await;
 
         let mut len_buf = [0u8; 4];
         let mut len_read = 0;
 
         while len_read < 4 {
-            match channel.wait().await {
+            match reader.wait().await {
                 Some(ChannelMsg::Data { data }) => {
                     let remaining = 4 - len_read;
                     if data.len() >= remaining {
@@ -53,7 +58,7 @@ impl AgentChannel {
         let mut read = 0;
 
         while read < len {
-            match channel.wait().await {
+            match reader.wait().await {
                 Some(ChannelMsg::Data { data }) => {
                     let remaining = len - read;
                     if data.len() >= remaining {
@@ -74,8 +79,8 @@ impl AgentChannel {
     }
 
     pub async fn close(&self) -> anyhow::Result<()> {
-        let channel = self.channel.lock().await;
-        channel.close().await?;
+        let writer = self.writer.lock().await;
+        writer.close().await?;
         Ok(())
     }
 }
@@ -103,10 +108,13 @@ pub async fn start(transport: &Transport, server_address: &str) -> anyhow::Resul
     let cmd = format!("sudo {} --ip {}", AGENT_PATH, server_address);
     channel.exec(true, cmd.as_bytes()).await?;
 
+    let (reader, writer) = channel.split();
+
     info!("Agent started, channel ready for packet forwarding");
 
     Ok(AgentChannel {
-        channel: Mutex::new(channel),
+        reader: Arc::new(Mutex::new(reader)),
+        writer: Arc::new(Mutex::new(writer)),
     })
 }
 

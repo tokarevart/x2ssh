@@ -50,9 +50,15 @@ pub async fn run_vpn(
 
     info!("VPN tunnel active. Press Ctrl+C to disconnect.");
 
-    tokio::signal::ctrl_c().await?;
+    tokio::select! {
+        result = session.forward() => {
+            info!("Forwarding ended: {:?}", result);
+        }
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received shutdown signal");
+        }
+    }
 
-    info!("Received shutdown signal");
     session.cleanup(transport, config).await?;
 
     Ok(())

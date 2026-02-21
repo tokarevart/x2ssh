@@ -28,6 +28,27 @@ impl TunDevice {
     pub fn inner(&self) -> &tun_rs::AsyncDevice {
         &self.inner
     }
+
+    #[cfg(target_os = "linux")]
+    pub async fn recv(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
+        self.inner.recv(buf).await.map_err(Into::into)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub async fn send(&self, packet: &[u8]) -> anyhow::Result<()> {
+        self.inner.send(packet).await?;
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    pub async fn recv(&self, _buf: &mut [u8]) -> anyhow::Result<usize> {
+        todo!("Windows TUN recv - Phase 4")
+    }
+
+    #[cfg(target_os = "windows")]
+    pub async fn send(&self, _packet: &[u8]) -> anyhow::Result<()> {
+        todo!("Windows TUN send - Phase 4")
+    }
 }
 
 #[cfg(target_os = "linux")]
