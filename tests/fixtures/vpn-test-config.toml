@@ -1,0 +1,15 @@
+[vpn]
+client_address = "10.8.0.2/24"
+server_address = "10.8.0.1/24"
+client_tun = "tun-x2ssh"
+mtu = 1400
+exclude = []
+
+post_up = [
+    "sysctl -w net.ipv4.ip_forward=1",
+    "iptables -t nat -I POSTROUTING -o eth0 -j MASQUERADE",
+]
+
+pre_down = [
+    "iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE",
+]

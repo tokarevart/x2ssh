@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Integration tests for x2ssh"
 requires-python = ">=3.12"
 dependencies = [
+    "docker>=7.0.0",
     "pysocks>=1.7.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",

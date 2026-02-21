@@ -515,7 +515,7 @@ x2ssh/
 - [x] Add stub for Windows: `todo!("Windows routing not yet implemented")`
 - [x] CLI integration (`--vpn` flag)
 - [x] Root privilege checking
-- [ ] Integration test fixtures: Dockerfile.vpn-client, Dockerfile.vpn-server-target
+- [x] Integration test fixtures: Dockerfile.vpn-client, Dockerfile.vpn-server-target
 
 **Deliverables:** Client TUN + routing working on Linux
 
@@ -700,9 +700,9 @@ opt-level = "z"  # Optimize for size
 ### Unit Tests (Rust)
 
 **MVP (Phase 1-5):**
-- [ ] Config file parsing
-- [ ] Hook command building (no substitution)
-- [ ] Framing/deframing
+- [x] Config file parsing
+- [x] Hook command building (no substitution)
+- [x] Framing/deframing
 
 **Later (Phase 6):**
 - [ ] Variable substitution
@@ -714,127 +714,133 @@ opt-level = "z"  # Optimize for size
 All tests run inside Docker containers (no root required on host):
 
 ```
-Docker Network: x2ssh-test-net (10.10.0.0/24)
+Docker Network: x2ssh-vpn-test-net (10.10.0.0/24)
 
 ┌─────────────────────────┐        ┌──────────────────────────────────┐
-│  Container: client      │  SSH   │  Container: server-target        │
+│  Container: vpn-client  │  SSH   │  Container: vpn-server-target    │
 │  IP: 10.10.0.10         │◄─────►│  IP: 10.10.0.20                  │
 │  (privileged)           │        │  (privileged)                    │
 │                         │        │                                  │
-│  - x2ssh --vpn          │        │  - sshd + x2ssh-agent            │
-│  - TUN: 10.8.0.2/24     │        │  - TUN: 10.8.0.1/24 (agent-owned)│
-│  - Test tools           │        │  - iptables MASQUERADE           │
+│  - x2ssh binary (mount) │        │  - sshd                          │
+│  - TUN: 10.8.0.2/24     │        │  - x2ssh-agent (deployed at runtime)│
+│  - Test tools           │        │  - TUN: 10.8.0.1/24 (agent-owned)│
+│                         │        │  - iptables MASQUERADE           │
 │                         │        │  - TCP echo (socat port 8080)    │
 │                         │        │  - UDP echo (socat port 8081)    │
-└─────────────────────────┘        │  - ping responder                │
-                                   └──────────────────────────────────┘
+└─────────────────────────┘        └──────────────────────────────────┘
 ```
 
 **Test Files:**
 ```
 tests/
-├── conftest.py                      # Add VPN fixtures
-├── vpn_client.py                    # VPN client wrapper (NEW)
+├── conftest.py                      # VPN fixtures (vpn_env, vpn_session)
+├── vpn_client.py                    # VpnTestEnv, VpnSession classes
 ├── tests/
-│   └── test_vpn.py                  # VPN integration tests (NEW)
+│   └── test_vpn.py                  # VPN integration tests
 └── fixtures/
-    ├── Dockerfile.vpn-client        # Client container (NEW)
-    ├── Dockerfile.vpn-server-target # Server + echo services (NEW)
-    └── vpn-test-config.toml         # Test VPN config (NEW)
+    ├── Dockerfile.vpn-client        # Client container
+    ├── Dockerfile.vpn-server-target # Server + echo services
+    └── vpn-test-config.toml         # Test VPN config
 ```
 
 **Test Scenarios (tests/tests/test_vpn.py):**
 
 ```python
-# Basic connectivity
+# Phase 2 Tests: Container Setup (enabled)
+def test_vpn_client_container_has_required_tools(vpn_env):
+    """Verify client container has iproute2, iptables, nc, ping, ssh."""
+    
+def test_vpn_server_container_has_sshd(vpn_env):
+    """Verify server container has sshd running."""
+
+def test_vpn_server_tcp_echo_service(vpn_env):
+    """Verify TCP echo service responds on server port 8080."""
+
+def test_vpn_client_can_ssh_to_server(vpn_env):
+    """Verify client can SSH to server."""
+
+def test_vpn_client_has_tun_device_access(vpn_env):
+    """Verify client container can access /dev/net/tun."""
+
+def test_vpn_server_has_tun_device_access(vpn_env):
+    """Verify server container can access /dev/net/tun."""
+
+def test_vpn_x2ssh_binary_exists(vpn_env):
+    """Verify x2ssh binary is mounted in client container."""
+
+# Phase 3 Tests: VPN Tunnel (disabled until Phase 3)
+@pytest.mark.skip(reason="Phase 3 - requires VPN tunnel implementation")
 def test_vpn_tunnel_establishment(vpn_session):
     """Verify VPN tunnel is established."""
-    # Check TUN interfaces exist (client + server)
-    # Check routing table on client
 
-def test_vpn_tcp_echo(vpn_session):
+@pytest.mark.skip(reason="Phase 3 - requires VPN tunnel implementation")
+def test_vpn_tcp_through_tunnel(vpn_session):
     """Test TCP traffic through VPN tunnel."""
-    # From client: echo "test" | nc 10.10.0.20 8080
-    # Verify echo response
 
-def test_vpn_udp_echo(vpn_session):
+@pytest.mark.skip(reason="Phase 3 - requires VPN tunnel implementation")
+def test_vpn_udp_through_tunnel(vpn_session):
     """Test UDP traffic through VPN tunnel."""
-    # From client: echo "test" | nc -u 10.10.0.20 8081
-    # Verify echo response
 
-def test_vpn_ping(vpn_session):
+@pytest.mark.skip(reason="Phase 3 - requires VPN tunnel implementation")
+def test_vpn_ping_through_tunnel(vpn_session):
     """Test ICMP traffic through VPN tunnel."""
-    # From client: ping -c 4 10.10.0.20
-    # Verify 0% packet loss
 
-# Hooks & cleanup
+@pytest.mark.skip(reason="Phase 3 - requires PostUp/PreDown implementation")
 def test_vpn_post_up_hooks_executed(vpn_session):
     """Verify PostUp hooks set up iptables rules."""
-    # Check iptables rules present
 
-def test_vpn_post_up_failure_aborts():
-    """Test that failed PostUp prevents startup."""
-    # Configure invalid PostUp command
-    # Attempt VPN connection
-    # Verify failure
+@pytest.mark.skip(reason="Phase 3 - requires PostUp/PreDown implementation")
+def test_vpn_pre_down_cleanup(vpn_session):
+    """Test PreDown hooks execute on disconnect."""
 
-def test_vpn_cleanup_on_disconnect(vpn_session):
-    """Test PreDown hooks execute and TUN is gone on disconnect."""
-    # Start VPN, stop VPN (simulate Ctrl+C)
-    # Verify TUN deleted (automatic), iptables cleaned (PreDown)
-
-# Routing (basic verification)
+@pytest.mark.skip(reason="Phase 3 - requires routing implementation")
 def test_vpn_default_route_via_tun(vpn_session):
     """Verify default route points to TUN interface."""
-    # Check routing table on client
-    # Verify default via tun-x2ssh
-
-def test_vpn_ssh_excluded_from_tunnel(vpn_session):
-    """Verify SSH connection excluded from VPN routing."""
-    # Check specific route for 10.10.0.20 bypasses TUN
 ```
 
 **Helper Modules:**
 
-`vpn_client.py` - VPN session management:
+`vpn_client.py` - VPN test environment and session management:
 ```python
-class VpnClient:
-    """Manages VPN client container and x2ssh process."""
+class VpnTestEnv:
+    """Manages Docker containers for VPN integration tests."""
     
-    def start_vpn(self, server_ip: str, config_path: Path) -> None:
-        """Start x2ssh --vpn inside client container."""
+    def start(self) -> None:
+        """Create network and start containers."""
     
-    def exec(self, cmd: str) -> tuple[int, str, str]:
-        """Execute command inside client container."""
+    def stop(self) -> None:
+        """Stop and remove all containers and network."""
     
-    def get_routing_table(self) -> list[str]:
-        """Get routing table from client."""
+    def exec_client(self, cmd: str) -> tuple[int, str]:
+        """Execute command in client container."""
+    
+    def exec_server(self, cmd: str) -> tuple[int, str]:
+        """Execute command in server container."""
+
+
+class VpnSession:
+    """Manages a VPN session for testing."""
+    
+    def start_vpn(self) -> None:
+        """Start x2ssh --vpn in client container."""
     
     def stop_vpn(self) -> None:
-        """Stop VPN and verify cleanup."""
+        """Stop x2ssh process in client container."""
+    
+    def is_vpn_running(self) -> bool:
+        """Check if x2ssh process is running."""
 ```
 
-**Pytest Fixtures (additions to conftest.py):**
+**Pytest Fixtures (in conftest.py):**
 
 ```python
 @pytest.fixture(scope="session")
-def vpn_docker_network():
-    """Create Docker network for VPN tests."""
-    # Create network: x2ssh-test-net (10.10.0.0/24)
-
-@pytest.fixture(scope="session")
-def vpn_containers(vpn_docker_network):
-    """Start VPN test containers."""
-    # Start server-target container (10.10.0.20)
-    # Start client container (10.10.0.10)
-    # Build and copy x2ssh + x2ssh-agent binaries
+def vpn_env(project_root: Path) -> Iterator[VpnTestEnv]:
+    """Provide a running VPN test environment (containers + network)."""
 
 @pytest.fixture
-def vpn_session(vpn_containers):
+def vpn_session(vpn_env: VpnTestEnv) -> Iterator[VpnSession]:
     """Provide a running VPN session."""
-    # Start x2ssh --vpn in client container
-    # Yield VpnClient instance
-    # Cleanup: stop VPN
 ```
 
 **Run tests:**

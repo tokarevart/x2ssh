@@ -10,6 +10,7 @@ import pytest
 
 from socks5_client import Socks5Client
 from ssh_server import SshContainer
+from vpn_client import VpnSession, VpnTestEnv
 
 
 @pytest.fixture(scope="session")
@@ -100,3 +101,21 @@ def socks5_client(x2ssh_process: dict[str, object]) -> Socks5Client:
 def echo_server_addr(ssh_container: SshContainer) -> tuple[str, int]:
     """Return the echo server address."""
     return ("127.0.0.1", 8080)
+
+
+@pytest.fixture(scope="session")
+def vpn_env(project_root: Path) -> Iterator[VpnTestEnv]:
+    """Provide a running VPN test environment (containers + network)."""
+    env = VpnTestEnv(project_root)
+    env.start()
+    yield env
+    env.stop()
+
+
+@pytest.fixture
+def vpn_session(vpn_env: VpnTestEnv) -> Iterator[VpnSession]:
+    """Provide a running VPN session."""
+    session = VpnSession(vpn_env)
+    session.start_vpn()
+    yield session
+    session.stop_vpn()

@@ -367,6 +367,7 @@ name = "x2ssh-tests"
 version = "0.1.0"
 source = { virtual = "tests" }
 dependencies = [
+    { name = "docker" },
     { name = "pysocks" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -375,6 +376,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "docker", specifier = ">=7.0.0" },
     { name = "pysocks", specifier = ">=1.7.1" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
