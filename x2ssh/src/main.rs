@@ -182,17 +182,6 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    // Load VPN config if VPN mode is enabled
-    let _vpn_config = if cli.vpn {
-        let config = cli.vpn_config()?;
-        info!("VPN mode enabled");
-        info!("VPN client address: {}", config.client_address);
-        info!("Client TUN: {}", config.client_tun);
-        Some(config)
-    } else {
-        None
-    };
-
     // SOCKS5 mode requires -D flag (for now, until VPN is fully implemented)
     if cli.socks_addr.is_none() && !cli.vpn {
         return Err(anyhow::anyhow!(
@@ -245,13 +234,25 @@ async fn main() -> anyhow::Result<()> {
         }
     } else {
         let vpn_config = cli.vpn_config()?;
+        info!("VPN mode enabled");
+        info!("VPN client address: {}", vpn_config.client_address);
+        info!("Client TUN: {}", vpn_config.client_tun);
+
         let transport_config = cli
             .transport_config()
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
+        info!(
+            "Connecting to {}@{}:{}",
+            transport_config.user, transport_config.host, transport_config.port
+        );
+
+        let transport = Transport::connect(transport_config.clone()).await?;
+        info!("SSH session established");
+
         let ssh_server_ip = resolve_host(&transport_config.host).await?;
 
-        vpn::run_vpn(&vpn_config, ssh_server_ip).await?;
+        vpn::run_vpn(&transport, &vpn_config, ssh_server_ip).await?;
         Ok(())
     }
 }

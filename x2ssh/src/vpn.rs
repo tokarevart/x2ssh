@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod hooks;
 pub mod routing;
 pub mod session;
 pub mod tun;
@@ -9,6 +10,7 @@ use session::VpnSession;
 use tracing::info;
 
 use crate::config::VpnConfig;
+use crate::transport::Transport;
 
 pub fn check_root() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
@@ -36,18 +38,22 @@ pub fn check_root() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn run_vpn(config: &VpnConfig, ssh_server_ip: IpAddr) -> anyhow::Result<()> {
+pub async fn run_vpn(
+    transport: &Transport,
+    config: &VpnConfig,
+    ssh_server_ip: IpAddr,
+) -> anyhow::Result<()> {
     check_root()?;
 
     info!("Starting VPN session");
-    let mut session = VpnSession::start(config, ssh_server_ip).await?;
+    let mut session = VpnSession::start(transport, config, ssh_server_ip).await?;
 
     info!("VPN tunnel active. Press Ctrl+C to disconnect.");
 
     tokio::signal::ctrl_c().await?;
 
     info!("Received shutdown signal");
-    session.cleanup().await?;
+    session.cleanup(transport, config).await?;
 
     Ok(())
 }

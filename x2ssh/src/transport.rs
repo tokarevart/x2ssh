@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use russh::ChannelMsg;
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::keys::PublicKey;
 use tokio::io::AsyncRead;
@@ -42,6 +43,13 @@ mod tests {
         let result = Transport::connect(config).await;
         assert!(result.is_err(), "Connection to invalid host should fail");
     }
+}
+
+#[derive(Debug)]
+pub struct ExecResult {
+    pub exit_code: u32,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 struct Client;
@@ -214,5 +222,63 @@ impl Transport {
 
         jh.abort();
         Ok(())
+    }
+
+    pub async fn exec(&self, command: &str) -> anyhow::Result<ExecResult> {
+        let session = self.session.lock().await;
+        let mut channel = session.channel_open_session().await?;
+        channel.exec(true, command).await?;
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut exit_code = 0u32;
+
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                ChannelMsg::Data { data } => {
+                    stdout.extend_from_slice(&data);
+                }
+                ChannelMsg::ExtendedData { data, ext } => {
+                    if ext == 1 {
+                        stderr.extend_from_slice(&data);
+                    }
+                }
+                ChannelMsg::ExitStatus { exit_status } => {
+                    exit_code = exit_status;
+                }
+                ChannelMsg::Eof => {}
+                _ => debug!("Channel message during exec: {:?}", msg),
+            }
+        }
+
+        Ok(ExecResult {
+            exit_code,
+            stdout,
+            stderr,
+        })
+    }
+
+    pub async fn exec_success(&self, command: &str) -> anyhow::Result<()> {
+        let result = self.exec(command).await?;
+
+        if result.exit_code == 0 {
+            Ok(())
+        } else {
+            let stdout = String::from_utf8_lossy(&result.stdout);
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            anyhow::bail!(
+                "Command '{}' failed with exit code {}: stdout={}, stderr={}",
+                command,
+                result.exit_code,
+                stdout.trim(),
+                stderr.trim()
+            );
+        }
+    }
+
+    pub async fn open_session_channel(&self) -> anyhow::Result<russh::Channel<russh::client::Msg>> {
+        let session = self.session.lock().await;
+        let channel = session.channel_open_session().await?;
+        Ok(channel)
     }
 }
