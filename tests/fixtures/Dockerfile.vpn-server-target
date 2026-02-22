@@ -24,4 +24,4 @@ RUN echo "root ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/root
 
 EXPOSE 22 8080 8081
 
-CMD ["/bin/sh", "-c", "socat TCP-LISTEN:8080,fork EXEC:'cat' & socat UDP-LISTEN:8081,fork EXEC:'cat' & exec /usr/sbin/sshd -D -e"]
+CMD ["/bin/sh", "-c", "socat TCP-LISTEN:8080,fork EXEC:'cat' & (while true; do nc -ul -p 8081 -e cat 2>/dev/null || true; done) & exec /usr/sbin/sshd -D -e"]
