@@ -64,23 +64,32 @@ class VpnTestEnv:
 
     def _start_server(self) -> None:
         fixtures = self.project_root / "tests" / "fixtures"
+        networking_config = {
+            self.NETWORK_NAME: {"IPAMConfig": {"IPv4Address": self.SERVER_IP}}
+        }
         self.server = self.client.containers.run(
             "x2ssh-vpn-server-target:latest",
             detach=True,
             privileged=True,
+            network=self.NETWORK_NAME,
+            networking_config=networking_config,
             volumes={str(fixtures / "keys"): {"bind": "/tmp/keys", "mode": "ro"}},
         )
-        if self.network:
-            self.network.connect(self.server, ipv4_address=self.SERVER_IP)
+        assert self.server is not None
         self._wait_log(self.server, "Server listening on")
 
     def _start_client(self) -> None:
         fixtures = self.project_root / "tests" / "fixtures"
         target = self.project_root / "target" / "release"
+        networking_config = {
+            self.NETWORK_NAME: {"IPAMConfig": {"IPv4Address": self.CLIENT_IP}}
+        }
         self.vpn_client = self.client.containers.run(
             "x2ssh-vpn-client:latest",
             detach=True,
             privileged=True,
+            network=self.NETWORK_NAME,
+            networking_config=networking_config,
             volumes={
                 str(fixtures / "keys"): {"bind": "/tmp/keys", "mode": "ro"},
                 str(target / "x2ssh"): {"bind": "/usr/local/bin/x2ssh", "mode": "ro"},
@@ -90,8 +99,6 @@ class VpnTestEnv:
                 },
             },
         )
-        if self.network:
-            self.network.connect(self.vpn_client, ipv4_address=self.CLIENT_IP)
 
     def _wait_log(
         self,
