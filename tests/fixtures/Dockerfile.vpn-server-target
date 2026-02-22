@@ -2,7 +2,6 @@ FROM alpine:3.19
 
 RUN apk add --no-cache \
     openssh \
-    socat \
     iproute2 \
     iptables \
     sudo \
@@ -24,4 +23,4 @@ RUN echo "root ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/root
 
 EXPOSE 22 8080 8081
 
-CMD ["/bin/sh", "-c", "socat TCP-LISTEN:8080,fork EXEC:'cat' & (while true; do nc -ul -p 8081 -e cat 2>/dev/null || true; done) & exec /usr/sbin/sshd -D -e"]
+CMD ["/bin/sh", "-c", "(while true; do nc -l -p 8080 -e cat; done) & (while true; do nc -ul -p 8081 -e cat; done) & exec /usr/sbin/sshd -D -e"]
