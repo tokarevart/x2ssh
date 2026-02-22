@@ -4,6 +4,10 @@ import time
 from pathlib import Path
 
 import docker
+import docker.errors
+import docker.models.containers
+import docker.models.networks
+import docker.types
 
 
 class VpnTestEnv:
@@ -13,6 +17,8 @@ class VpnTestEnv:
     NETWORK_SUBNET = "10.10.0.0/24"
     SERVER_IP = "10.10.0.20"
     CLIENT_IP = "10.10.0.10"
+    SERVER_TUN_IP = "10.8.0.1"
+    CLIENT_TUN_IP = "10.8.0.2"
 
     def __init__(self, project_root: Path):
         self.project_root = project_root
@@ -41,6 +47,11 @@ class VpnTestEnv:
     def _create_network(self) -> None:
         try:
             existing = self.client.networks.get(self.NETWORK_NAME)
+            for container in existing.containers:
+                try:
+                    existing.disconnect(container)
+                except docker.errors.APIError:
+                    pass
             existing.remove()
         except docker.errors.NotFound:
             pass
@@ -86,7 +97,7 @@ class VpnTestEnv:
         self,
         container: docker.models.containers.Container,
         pattern: str,
-        timeout: float = 30,
+        timeout: float = 10,
     ) -> None:
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -100,6 +111,8 @@ class VpnTestEnv:
         """Execute command in client container, return (exit_code, output)."""
         if not self.vpn_client:
             raise RuntimeError("Client container not started")
+        if any(c in cmd for c in "|&;<>()$`\\"):
+            cmd = f'sh -c "{cmd}"'
         exit_code, output = self.vpn_client.exec_run(cmd)
         return exit_code, output.decode()
 
@@ -107,6 +120,8 @@ class VpnTestEnv:
         """Execute command in server container, return (exit_code, output)."""
         if not self.server:
             raise RuntimeError("Server container not started")
+        if any(c in cmd for c in "|&;<>()$`\\"):
+            cmd = f'sh -c "{cmd}"'
         exit_code, output = self.server.exec_run(cmd)
         return exit_code, output.decode()
 
@@ -117,20 +132,39 @@ class VpnSession:
     def __init__(self, env: VpnTestEnv):
         self.env = env
 
-    def start_vpn(self) -> None:
+    def start_vpn(self, timeout: float = 30.0) -> None:
         """Start x2ssh --vpn in client container (background process)."""
+        self.env.exec_client("pkill -INT -x x2ssh || true")
         self.env.exec_client(
-            "x2ssh --vpn -i /tmp/keys/id_ed25519 -p 22 root@10.10.0.20 "
+            "RUST_LOG=info x2ssh --vpn --config /etc/x2ssh/config.toml "
+            "-i /tmp/keys/id_ed25519 "
+            "-p 22 root@10.10.0.20 "
             "> /tmp/x2ssh.log 2>&1 &"
         )
-        time.sleep(3)
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.is_vpn_running() and self._is_tunnel_ready():
+                return
+            time.sleep(0.5)
+        raise TimeoutError("VPN tunnel failed to establish")
 
     def stop_vpn(self) -> None:
         """Stop x2ssh process in client container."""
-        self.env.exec_client("pkill -x x2ssh || true")
-        time.sleep(1)
+        self.env.exec_client("pkill -INT -x x2ssh || true")
+        time.sleep(2)
 
     def is_vpn_running(self) -> bool:
         """Check if x2ssh process is running."""
         exit_code, _ = self.env.exec_client("pgrep -x x2ssh")
         return exit_code == 0
+
+    def _is_tunnel_ready(self) -> bool:
+        """Check if TUN interface exists on client."""
+        exit_code, _ = self.env.exec_client("ip link show tun-x2ssh")
+        return exit_code == 0
+
+    def get_vpn_logs(self) -> str:
+        """Get x2ssh logs from client container."""
+        _, output = self.env.exec_client("cat /tmp/x2ssh.log 2>/dev/null || echo ''")
+        return output

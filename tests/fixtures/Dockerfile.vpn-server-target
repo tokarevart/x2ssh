@@ -20,6 +20,8 @@ RUN echo "PermitRootLogin prohibit-password" >> /etc/ssh/sshd_config && \
     echo "PasswordAuthentication no" >> /etc/ssh/sshd_config && \
     echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config
 
+RUN echo "root ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/root
+
 EXPOSE 22 8080 8081
 
 CMD ["/bin/sh", "-c", "socat TCP-LISTEN:8080,fork EXEC:'cat' & socat UDP-LISTEN:8081,fork EXEC:'cat' & exec /usr/sbin/sshd -D -e"]

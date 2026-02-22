@@ -1,11 +1,19 @@
-FROM alpine:3.19
+FROM debian:trixie-slim
 
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     iputils-ping \
     netcat-openbsd \
     iptables \
     openssh-client \
-    procps
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /etc/x2ssh /tmp/keys
+
+COPY vpn-test-config.toml /etc/x2ssh/config.toml
+
+# Mount x2ssh binary at /usr/local/bin/x2ssh
+# Mount SSH keys at /tmp/keys/
 
 CMD ["sleep", "infinity"]

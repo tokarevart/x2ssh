@@ -43,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
         loop {
             match tun_for_read.recv(&mut buf).await {
                 Ok(n) => {
+                    eprintln!("TUN→CLIENT: sending {} bytes", n);
                     if let Err(e) = proto::write_framed(&mut stdout, &buf[..n]).await {
                         eprintln!("stdout write error: {}", e);
                         return Err::<(), anyhow::Error>(e);

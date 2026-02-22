@@ -112,7 +112,7 @@ def vpn_env(project_root: Path) -> Iterator[VpnTestEnv]:
     env.stop()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def vpn_session(vpn_env: VpnTestEnv) -> Iterator[VpnSession]:
     """Provide a running VPN session."""
     session = VpnSession(vpn_env)

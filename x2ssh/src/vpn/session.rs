@@ -88,8 +88,7 @@ impl VpnSession {
                     Ok(Some(packet)) => {
                         debug!("Agent→TUN: {} bytes", packet.len());
                         if let Err(e) = tun.send(&packet).await {
-                            error!("Failed to send packet to TUN: {}", e);
-                            return Err(e);
+                            debug!("TUN send failed (continuing): {}", e);
                         }
                     }
                     Ok(None) => {

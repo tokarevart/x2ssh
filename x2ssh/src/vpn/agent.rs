@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bytes::BytesMut;
 use russh::ChannelMsg;
 use russh::ChannelReadHalf;
 use russh::ChannelWriteHalf;
@@ -15,7 +16,7 @@ const AGENT_PATH: &str = "/tmp/x2ssh-agent";
 
 #[derive(Clone)]
 pub struct AgentChannel {
-    reader: Arc<Mutex<ChannelReadHalf>>,
+    reader: Arc<Mutex<(ChannelReadHalf, BytesMut)>>,
     writer: Arc<Mutex<ChannelWriteHalf<Msg>>>,
 }
 
@@ -30,50 +31,49 @@ impl AgentChannel {
     }
 
     pub async fn recv_packet(&self) -> anyhow::Result<Option<Vec<u8>>> {
-        let mut reader = self.reader.lock().await;
+        let mut guard = self.reader.lock().await;
+        let (reader, buffer) = &mut *guard;
 
-        let mut len_buf = [0u8; 4];
-        let mut len_read = 0;
-
-        while len_read < 4 {
+        // Read length prefix (4 bytes)
+        while buffer.len() < 4 {
             match reader.wait().await {
                 Some(ChannelMsg::Data { data }) => {
-                    let remaining = 4 - len_read;
-                    if data.len() >= remaining {
-                        len_buf[len_read..].copy_from_slice(&data[..remaining]);
-                        len_read = 4;
-                    } else {
-                        len_buf[len_read..len_read + data.len()].copy_from_slice(&data);
-                        len_read += data.len();
-                    }
+                    debug!("AGENT→CLIENT: {} bytes on channel", data.len());
+                    buffer.extend_from_slice(&data);
+                }
+                Some(ChannelMsg::Eof) => {
+                    info!("AGENT→CLIENT: EOF");
+                    return Ok(None);
+                }
+                Some(msg) => {
+                    debug!("AGENT→CLIENT: other message: {:?}", msg);
+                }
+                None => {
+                    info!("AGENT→CLIENT: channel closed");
+                    return Ok(None);
+                }
+            }
+        }
+
+        let len = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
+        debug!("AGENT→CLIENT: expecting {} byte packet", len);
+
+        // Read packet data
+        while buffer.len() < 4 + len {
+            match reader.wait().await {
+                Some(ChannelMsg::Data { data }) => {
+                    debug!("AGENT→CLIENT: {} more bytes", data.len());
+                    buffer.extend_from_slice(&data);
                 }
                 Some(ChannelMsg::Eof) => return Ok(None),
-                Some(msg) => debug!("Ignoring channel message while reading length: {:?}", msg),
+                Some(msg) => debug!("AGENT→CLIENT: other message: {:?}", msg),
                 None => return Ok(None),
             }
         }
 
-        let len = u32::from_be_bytes(len_buf) as usize;
-        let mut packet = vec![0u8; len];
-        let mut read = 0;
-
-        while read < len {
-            match reader.wait().await {
-                Some(ChannelMsg::Data { data }) => {
-                    let remaining = len - read;
-                    if data.len() >= remaining {
-                        packet[read..].copy_from_slice(&data[..remaining]);
-                        read = len;
-                    } else {
-                        packet[read..read + data.len()].copy_from_slice(&data);
-                        read += data.len();
-                    }
-                }
-                Some(ChannelMsg::Eof) => return Ok(None),
-                Some(msg) => debug!("Ignoring channel message while reading packet: {:?}", msg),
-                None => return Ok(None),
-            }
-        }
+        // Extract packet and consume from buffer
+        let packet = buffer[4..4 + len].to_vec();
+        let _ = buffer.split_to(4 + len);
 
         Ok(Some(packet))
     }
@@ -88,13 +88,28 @@ impl AgentChannel {
 pub async fn deploy(transport: &Transport) -> anyhow::Result<()> {
     info!("Deploying agent binary ({} bytes)", AGENT_BINARY.len());
 
-    let encoded = base64_encode(AGENT_BINARY);
-    let cmd = format!(
-        "echo '{}' | base64 -d > {} && chmod +x {}",
-        encoded, AGENT_PATH, AGENT_PATH
-    );
+    let mut channel = transport.open_session_channel().await?;
+    channel
+        .exec(true, b"cat > /tmp/x2ssh-agent && chmod +x /tmp/x2ssh-agent")
+        .await?;
 
-    transport.exec_success(&cmd).await?;
+    channel.data(AGENT_BINARY).await?;
+    channel.eof().await?;
+
+    let mut exit_code = 0u32;
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            ChannelMsg::ExitStatus { exit_status } => {
+                exit_code = exit_status;
+            }
+            ChannelMsg::Eof => break,
+            _ => {}
+        }
+    }
+
+    if exit_code != 0 {
+        anyhow::bail!("Agent deployment failed with exit code {}", exit_code);
+    }
 
     info!("Agent binary deployed to {}", AGENT_PATH);
     Ok(())
@@ -113,14 +128,9 @@ pub async fn start(transport: &Transport, server_address: &str) -> anyhow::Resul
     info!("Agent started, channel ready for packet forwarding");
 
     Ok(AgentChannel {
-        reader: Arc::new(Mutex::new(reader)),
+        reader: Arc::new(Mutex::new((reader, BytesMut::with_capacity(2048)))),
         writer: Arc::new(Mutex::new(writer)),
     })
-}
-
-fn base64_encode(data: &[u8]) -> String {
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 #[cfg(test)]
