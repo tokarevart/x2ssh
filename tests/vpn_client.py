@@ -1,20 +1,18 @@
 """VPN container management for x2ssh integration tests."""
 
+import subprocess
 import time
 from pathlib import Path
 
 import docker
-import docker.errors
+import docker.errors as docker_errors
 import docker.models.containers
-import docker.models.networks
-import docker.types
 
 
 class VpnTestEnv:
-    """Manages Docker containers for VPN integration tests."""
+    """Manages Docker containers for VPN integration tests using docker compose."""
 
-    NETWORK_NAME = "x2ssh-vpn-test-net"
-    NETWORK_SUBNET = "10.10.0.0/24"
+    COMPOSE_PROJECT = "x2ssh-vpn-test"
     SERVER_IP = "10.10.0.20"
     CLIENT_IP = "10.10.0.10"
     SERVER_TUN_IP = "10.8.0.1"
@@ -22,103 +20,97 @@ class VpnTestEnv:
 
     def __init__(self, project_root: Path):
         self.project_root = project_root
-        self.client = docker.from_env()
-        self.network: docker.models.networks.Network | None = None
+        self.compose_file = (
+            project_root / "tests" / "fixtures" / "docker-compose.vpn.yaml"
+        )
+        self.docker_client = docker.from_env()
         self.server: docker.models.containers.Container | None = None
         self.vpn_client: docker.models.containers.Container | None = None
 
     def start(self) -> None:
-        """Start all containers and network."""
-        self._create_network()
-        self._start_server()
-        self._start_client()
+        """Start all containers using docker compose."""
+        subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(self.compose_file),
+                "-p",
+                self.COMPOSE_PROJECT,
+                "up",
+                "-d",
+                "--build",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        self._wait_containers_ready()
+        self._get_container_refs()
 
     def stop(self) -> None:
-        """Stop and remove all containers and network."""
-        for container in [self.vpn_client, self.server]:
-            if container:
-                container.remove(force=True, v=True)
-        if self.network:
-            try:
-                self.network.remove()
-            except docker.errors.APIError:
-                pass
-
-    def _create_network(self) -> None:
-        try:
-            existing = self.client.networks.get(self.NETWORK_NAME)
-            for container in existing.containers:
-                try:
-                    existing.disconnect(container)
-                except docker.errors.APIError:
-                    pass
-            existing.remove()
-        except docker.errors.NotFound:
-            pass
-
-        ipam_pool = docker.types.IPAMPool(subnet=self.NETWORK_SUBNET)
-        ipam_config = docker.types.IPAMConfig(pool_configs=[ipam_pool])
-        self.network = self.client.networks.create(
-            self.NETWORK_NAME, driver="bridge", ipam=ipam_config
+        """Stop and remove all containers using docker compose."""
+        subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(self.compose_file),
+                "-p",
+                self.COMPOSE_PROJECT,
+                "down",
+                "-v",
+            ],
+            check=True,
+            capture_output=True,
         )
+        self.server = None
+        self.vpn_client = None
 
-    def _start_server(self) -> None:
-        fixtures = self.project_root / "tests" / "fixtures"
-        networking_config = {
-            self.NETWORK_NAME: {"IPAMConfig": {"IPv4Address": self.SERVER_IP}}
-        }
-        self.server = self.client.containers.run(
-            "x2ssh-vpn-server-target:latest",
-            detach=True,
-            privileged=True,
-            network=self.NETWORK_NAME,
-            networking_config=networking_config,
-            volumes={str(fixtures / "keys"): {"bind": "/tmp/keys", "mode": "ro"}},
-        )
-        assert self.server is not None
-        self._wait_log(self.server, "Server listening on")
-
-    def _start_client(self) -> None:
-        fixtures = self.project_root / "tests" / "fixtures"
-        target = self.project_root / "target" / "release"
-        networking_config = {
-            self.NETWORK_NAME: {"IPAMConfig": {"IPv4Address": self.CLIENT_IP}}
-        }
-        self.vpn_client = self.client.containers.run(
-            "x2ssh-vpn-client:latest",
-            detach=True,
-            privileged=True,
-            network=self.NETWORK_NAME,
-            networking_config=networking_config,
-            volumes={
-                str(fixtures / "keys"): {"bind": "/tmp/keys", "mode": "ro"},
-                str(target / "x2ssh"): {"bind": "/usr/local/bin/x2ssh", "mode": "ro"},
-                str(fixtures / "vpn-test-config.toml"): {
-                    "bind": "/etc/x2ssh/config.toml",
-                    "mode": "ro",
-                },
-            },
-        )
-
-    def _wait_log(
-        self,
-        container: docker.models.containers.Container,
-        pattern: str,
-        timeout: float = 10,
-    ) -> None:
+    def _wait_containers_ready(self, timeout: float = 30.0) -> None:
+        """Wait for server container to be ready."""
         deadline = time.time() + timeout
         while time.time() < deadline:
-            logs = container.logs().decode()
-            if pattern in logs:
-                return
+            try:
+                result = subprocess.run(
+                    [
+                        "docker",
+                        "compose",
+                        "-f",
+                        str(self.compose_file),
+                        "-p",
+                        self.COMPOSE_PROJECT,
+                        "logs",
+                        "vpn-server",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                if "Server listening on" in result.stdout:
+                    return
+            except subprocess.CalledProcessError:
+                pass
             time.sleep(0.5)
-        raise TimeoutError(f"Pattern '{pattern}' not found in container logs")
+        raise TimeoutError("VPN server container not ready in time")
+
+    def _get_container_refs(self) -> None:
+        """Get container references for exec operations."""
+        server_name = f"{self.COMPOSE_PROJECT}-vpn-server-1"
+        client_name = f"{self.COMPOSE_PROJECT}-vpn-client-1"
+        try:
+            self.server = self.docker_client.containers.get(server_name)
+        except docker_errors.NotFound:
+            pass
+        try:
+            self.vpn_client = self.docker_client.containers.get(client_name)
+        except docker_errors.NotFound:
+            pass
 
     def exec_client(self, cmd: str) -> tuple[int, str]:
         """Execute command in client container, return (exit_code, output)."""
         if not self.vpn_client:
             raise RuntimeError("Client container not started")
-        if any(c in cmd for c in "|&;<>()$`\\"):
+        if any(c in cmd for c in "|&;<>()$`\n"):
             cmd = f'sh -c "{cmd}"'
         exit_code, output = self.vpn_client.exec_run(cmd)
         return exit_code, output.decode()
@@ -127,7 +119,7 @@ class VpnTestEnv:
         """Execute command in server container, return (exit_code, output)."""
         if not self.server:
             raise RuntimeError("Server container not started")
-        if any(c in cmd for c in "|&;<>()$`\\"):
+        if any(c in cmd for c in "|&;<>()$`\n"):
             cmd = f'sh -c "{cmd}"'
         exit_code, output = self.server.exec_run(cmd)
         return exit_code, output.decode()

@@ -80,7 +80,7 @@ x2ssh/
 │   └── src/main.rs
 ├── tests/                    # Python integration tests (uv workspace member)
 │   ├── tests/                # Test files
-│   └── fixtures/             # SSH keys, Dockerfile
+│   └── fixtures/             # SSH keys, Dockerfiles, docker-compose.vpn.yaml
 ├── scripts/                  # check.sh, build-test-image.sh, generate-test-keys.sh
 └── pyproject.toml            # uv workspace root
 ```
@@ -89,8 +89,8 @@ x2ssh/
 
 - **Rust**: Pure logic, no network needed
 - **Python**: Full workflows, network behavior, binary testing
-  - SOCKS5: Tests proxy forwarding via echo server in SSH container
-  - VPN (planned): Tests tunnel via 2 containers (client + server-target with echo services)
+  - SOCKS5: Uses testcontainers for dynamic port allocation (single SSH container)
+  - VPN: Uses docker-compose for static IP network (client + server containers)
 
 ## Troubleshooting
 

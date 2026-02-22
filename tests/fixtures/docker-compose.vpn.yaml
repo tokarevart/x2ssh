@@ -1,0 +1,31 @@
+services:
+  vpn-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.vpn-server-target
+    privileged: true
+    networks:
+      vpn-net:
+        ipv4_address: 10.10.0.20
+    volumes:
+      - ./keys:/tmp/keys:ro
+
+  vpn-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.vpn-client
+    privileged: true
+    networks:
+      vpn-net:
+        ipv4_address: 10.10.0.10
+    volumes:
+      - ./keys:/tmp/keys:ro
+      - ../../target/release/x2ssh:/usr/local/bin/x2ssh:ro
+      - ./vpn-test-config.toml:/etc/x2ssh/config.toml:ro
+
+networks:
+  vpn-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.0.0/24
